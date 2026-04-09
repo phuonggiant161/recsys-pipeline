@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+
+data/raw/*
+data/interim/*
+data/reports/*
+
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/reports/.gitkeep
