@@ -16,17 +16,6 @@ After downloading, place files into:
 
 data/raw/
 
-## Required columns
-
-The dataset must contain at least:
-- `customer_id`
-- `article_id`
-
-## Run on Windows
-
-Double click:
-
-`run.bat`
 
 ## Run in terminal
 

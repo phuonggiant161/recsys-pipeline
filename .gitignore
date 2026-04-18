@@ -3,9 +3,9 @@ __pycache__/
 *.pyc
 
 data/raw/*
-data/interim/*
+data/processed/*
 data/reports/*
 
 !data/raw/.gitkeep
-!data/interim/.gitkeep
+!data/processed/.gitkeep
 !data/reports/.gitkeep

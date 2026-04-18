@@ -1,121 +1,126 @@
 from pathlib import Path
 import pandas as pd
 
+from src.config import get_dataset_config
+from src.io_utils import load_dataframe
 from src.kcore import make_k_core
+from src.thinning import generate_random_thinning_levels
 from src.metrics import build_reference_stats, compute_sparsity_metrics
+from src.dataset_folder import save_dataset_folder
 
-
-DATASET_NAME = "hm" # đổi thành "baby_product" khi muốn chạy bộ kia
-
-DATASET_CONFIG = {
-    "hm": {
-        "input_path": "data/raw/hm.csv",
-        "user_col": "customer_id",
-        "item_col": "article_id",
-        "k": 100
-    },
-    "baby_product": {
-        "input_path": "data/raw/baby_product.parquet",
-        "user_col": "user_id",
-        "item_col": "parent_asin",
-        "k": 5
-    }
-}
-
-cfg = DATASET_CONFIG[DATASET_NAME]
-
-INPUT_PATH = cfg["input_path"]
-USER_COL = cfg["user_col"]
-ITEM_COL = cfg["item_col"]
-K = cfg["k"]
-VERBOSE = True
-
-OUTPUT_DATA_PATH = f"data/interim/{DATASET_NAME}_dense_output.csv"
-OUTPUT_REPORT_PATH = f"data/reports/{DATASET_NAME}_dense_report.csv"
-
-
-def load_data(path: str) -> pd.DataFrame:
-    path_obj = Path(path)
-
-    if not path_obj.exists():
-        raise FileNotFoundError(f"Không tìm thấy file input: {path_obj}")
-
-    suffix = path_obj.suffix.lower()
-
-    if suffix == ".csv":
-        return pd.read_csv(path_obj)
-    elif suffix == ".parquet":
-        return pd.read_parquet(path_obj)
-    else:
-        raise ValueError(f"Định dạng file chưa hỗ trợ: {suffix}")
-
-
-def save_report(report: dict, path: str):
-    output_path = Path(path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame([report]).to_csv(output_path, index=False)
+#thay tham số đầu vào
+DATASET_NAME = "hm"
+K = 100
+KEEP_FRACS = [0.9, 0.7, 0.5, 0.3, 0.1]
+SEED = 42
 
 
 def main():
-    raw_df = load_data(INPUT_PATH)
+#load dataset
+    cfg = get_dataset_config(DATASET_NAME)
+    input_path = cfg["input_path"]
+    user_col = cfg["user_col"]
+    item_col = cfg["item_col"]
 
-    required_cols = [USER_COL, ITEM_COL]
-    missing_cols = [col for col in required_cols if col not in raw_df.columns]
-    if missing_cols:
-        raise ValueError(f"Thiếu cột bắt buộc: {missing_cols}")
+    output_root = Path("data/processed")
+    output_root.mkdir(parents=True, exist_ok=True)
 
-    print(f"Running dataset: {DATASET_NAME}")
-    print("Step 1: Dày hóa dữ liệu bằng k-core để tạo base dataset")
-
-#dataset sau khi đã làm dày hóa --> đây mới là dataset base của toàn bộ experiment 
+    print("Step 1: Load raw data")
+    df = load_dataframe(input_path)
+    print(f"Raw shape: {df.shape}")
+# tạo dense dataset bằng cách áp dụng k-core
+    print(f"Step 2: Apply {K}-core")
     dense_df = make_k_core(
-        raw_df,
-        user_col=USER_COL,
-        item_col=ITEM_COL,
+        df=df,
+        user_col=user_col,
+        item_col=item_col,
         k=K,
-        verbose=VERBOSE
+        verbose=True
     )
-
-    print("Step 2: Build reference stats từ dense dataset")
+#tính toán một số thống kê tham chiếu từ dataset dense để hỗ trợ tính toán các metrics về sparsity ở bước tiếp
     reference_stats = build_reference_stats(
         dense_df,
-        user_col=USER_COL,
-        item_col=ITEM_COL
+        user_col=user_col,
+        item_col=item_col
     )
-
-    print("Step 3: Tính metrics của dense dataset (base)")
-    dense_stats = compute_sparsity_metrics(
+# tính toán độ thưa của dataset gốc
+    dense_metrics = compute_sparsity_metrics(
         dense_df,
-        reference_stats=reference_stats,
-        user_col=USER_COL,
-        item_col=ITEM_COL
+        user_col=user_col,
+        item_col=item_col,
+        reference_stats=reference_stats
     )
 
-    print("Dense dataset stats:")
-    for key, value in dense_stats.items():
-        print(f"  {key}: {value}")
-
-    Path("data/interim").mkdir(parents=True, exist_ok=True)
-    Path("data/reports").mkdir(parents=True, exist_ok=True)
-
-    dense_df.to_csv(OUTPUT_DATA_PATH, index=False)
-
-    report = {
+    dense_output = output_root / f"{DATASET_NAME}_k{K}"
+    dense_metadata = {
         "dataset_name": DATASET_NAME,
-        "input_path": INPUT_PATH,
-        "output_data_path": OUTPUT_DATA_PATH,
-        "user_col": USER_COL,
-        "item_col": ITEM_COL,
+        "method": "kcore",
+        "user_col": user_col,
+        "item_col": item_col,
         "k": K,
+        "reference_stats": reference_stats,
+        "metrics": dense_metrics,
     }
 
-    for key, value in dense_stats.items():
-        report[f"dense_{key}"] = value
+    save_dataset_folder(
+        df=dense_df,
+        output_dir=dense_output,
+        user_col=user_col,
+        item_col=item_col,
+        metadata=dense_metadata
+    )
 
-    save_report(report, OUTPUT_REPORT_PATH)
+#thưa hóa dataset bằng cách random thưa hóa với các mức độ thưa khác nhau dựa trên dataset dense đã tạo ở bước trước
+    print("Step 3: Random thinning")
+    thinning_outputs = generate_random_thinning_levels(
+        df=dense_df,
+        keep_fracs=KEEP_FRACS,
+        seed=SEED
+    )
 
-    print(f"Output Data: {OUTPUT_DATA_PATH}")
-    print(f"Report: {OUTPUT_REPORT_PATH}")
+    report_rows = []
+    report_rows.append({"dataset": "dense_kcore", "keep_frac": 1.0, **dense_metrics})
+
+#  tính toán các metrics về sparsity cho từng dataset thưa được tạo ra
+    for level_name, thin_df in thinning_outputs.items():
+        thin_metrics = compute_sparsity_metrics(
+            thin_df,
+            user_col=user_col,
+            item_col=item_col,
+            reference_stats=reference_stats
+        )
+
+        thin_output = output_root / f"{DATASET_NAME}_k{K}_{level_name}"
+        thin_metadata = {
+            "dataset_name": DATASET_NAME,
+            "method": "random_thinning",
+            "parent_dataset": str(dense_output),
+            "user_col": user_col,
+            "item_col": item_col,
+            "keep_frac": len(thin_df) / len(dense_df),
+            "reference_stats": reference_stats,
+            "metrics": thin_metrics,
+        }
+
+        save_dataset_folder(
+            df=thin_df,
+            output_dir=thin_output,
+            user_col=user_col,
+            item_col=item_col,
+            metadata=thin_metadata
+        )
+
+        report_rows.append({
+            "dataset": level_name,
+            "keep_frac": len(thin_df) / len(dense_df),
+            **thin_metrics
+        })
+
+    report_df = pd.DataFrame(report_rows)
+    Path("data/reports").mkdir(parents=True, exist_ok=True)
+    report_df.to_csv(f"data/reports/{DATASET_NAME}_k{K}_sparsity_summary.csv", index=False)
+
+    print("Done.")
 
 
 if __name__ == "__main__":
