@@ -1,8 +1,11 @@
 # Recommender Data Pipeline
+1. File code
+src.metrics: đo độ thưa của dataset
+src.thinning: làm thưa hóa
+src.kcore: làm dày hóa
 
-This project performs:
-1. k-core densification
-2. sparsity metrics calculation before and after densification
+2. Report
+Các số liệu in ra được save tại folder reports
 
 ## Prepare data
 
