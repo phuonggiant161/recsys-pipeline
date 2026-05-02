@@ -70,23 +70,33 @@ def compute_sparsity_metrics(
         denom_users = n_users
         denom_items = n_items
         denom_rows = int(len(df))
+#gini
+    if reference_stats is not None:
+        base_users = reference_stats["base_users"]
+        base_items = reference_stats["base_items"]
+
+        user_counts_for_gini = user_counts.reindex(base_users, fill_value=0)
+        item_counts_for_gini = item_counts.reindex(base_items, fill_value=0)
+    else:
+        user_counts_for_gini = user_counts
+        item_counts_for_gini = item_counts
 
 #OSS
  # Cách 1: unique current interactions (1 cặp U,I) / reference U*I
     denom_ui = denom_users * denom_items
 
-    oss_c1 = (
+    oss = (
         n_interactions / denom_ui
         if denom_ui > 0
         else np.nan
     )
 # OSS method 2:
-# unique current interactions / current raw row count
-    oss_c2 = (
-        n_interactions / denom_rows
-        if denom_rows > 0
-        else np.nan
-    )
+# total records / reference U*I
+    # oss_c2 = (
+    #     n_rows / denom_ui
+    #     if denom_ui > 0
+    #     else np.nan
+    # )
 
   # uss
     user_uss = n_interactions/denom_users
@@ -116,11 +126,11 @@ def compute_sparsity_metrics(
         #"oss_denom_rows": int(denom_rows),
 
         # OSS C1: current unique interactions / reference U*I
-        "oss_c1": float(oss_c1) if pd.notna(oss_c1) else np.nan,
+        "oss": float(oss) if pd.notna(oss) else np.nan,
         # "oss_c1_pct": float(oss_c1 * 100) if pd.notna(oss_c1) else np.nan,
 
         # OSS C2: current unique interactions / reference len(df)
-        "oss_c2": float(oss_c2) if pd.notna(oss_c2) else np.nan,
+        # "oss_c2": float(oss_c2) if pd.notna(oss_c2) else np.nan,
         # "oss_c2_pct": float(oss_c2 * 100) if pd.notna(oss_c2) else np.nan,
 
         # USS / ISS
@@ -128,8 +138,8 @@ def compute_sparsity_metrics(
         "iss": float(item_iss) if pd.notna(item_iss) else np.nan,
 
         #gini
-        "user_gini": float(gini(user_counts.values)) if len(user_counts) else np.nan,
-        "item_gini": float(gini(item_counts.values)) if len(item_counts) else np.nan,
+        "user_gini": float(gini(user_counts_for_gini.values)),
+        "item_gini": float(gini(item_counts_for_gini.values)),
 
         # cold-start
         "coldstart_user": float(coldstart_user) if pd.notna(coldstart_user) else np.nan,
@@ -160,6 +170,8 @@ def build_reference_stats(
         "base_n_users": int(pair_df[user_col].nunique()),
         "base_n_items": int(pair_df[item_col].nunique()),
         "base_n_interactions": int(len(pair_df)),  # unique (user, item), để check thêm nếu cần
+        "base_users": pair_df[user_col].drop_duplicates().tolist(),
+        "base_items": pair_df[item_col].drop_duplicates().tolist(),
     }
 
 

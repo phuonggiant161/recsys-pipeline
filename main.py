@@ -4,15 +4,24 @@ import pandas as pd
 from src.config import get_dataset_config
 from src.io_utils import load_dataframe
 from src.kcore import make_k_core
-from src.thinning import generate_random_thinning_levels, generate_tail_item_cut_levels
+from src.thinning import generate_random_thinning_levels, generate_head_item_cut_levels
 from src.metrics import build_reference_stats, compute_sparsity_metrics
 from src.dataset_folder import save_dataset_folder
 
 # thay tham số đầu vào
-DATASET_NAME = "baby_product"
-K = 5
+# DATASET_NAME = "baby_product" #hm
+# K = 5 #100
+# KEEP_FRACS = [0.9, 0.7, 0.5, 0.3, 0.1]
+# SEED = 42
+# CUT_RATIO_PER_ROUND = 0.5
+# TOP_N_PER_ROUND = 1000 #500
+
+DATASET_NAME = "hm" #hm
+K = 10 #100
 KEEP_FRACS = [0.9, 0.7, 0.5, 0.3, 0.1]
 SEED = 42
+CUT_RATIO_PER_ROUND = 0.5
+TOP_N_PER_ROUND = 500
 
 
 def main():
@@ -110,18 +119,23 @@ def main():
             }
         )
 
-    print("Step 4: Tail-item thinning")
-    tail_outputs = generate_tail_item_cut_levels(
-        df=dense_df, item_col=item_col, keep_fracs=KEEP_FRACS
-    )
+    print("Step 4: Head-item thinning")
+    head_outputs = generate_head_item_cut_levels(
+        df=dense_df,
+        item_col=item_col,
+        keep_fracs=KEEP_FRACS,
+        cut_ratio_per_round=CUT_RATIO_PER_ROUND,
+        top_n_per_round=TOP_N_PER_ROUND,
+        seed=SEED
+)
 
-    tail_report_rows = []
+    head_report_rows = []
 
-    tail_report_rows.append(
+    head_report_rows.append(
         {"dataset": "dense_kcore", "keep_frac": 1.0, **dense_metrics}
     )
 
-    for level_name, thin_df in tail_outputs.items():
+    for level_name, thin_df in head_outputs.items():
         thin_metrics = compute_sparsity_metrics(
             thin_df, user_col=user_col, item_col=item_col, reference_stats=reference_stats
         )
@@ -131,7 +145,7 @@ def main():
 
         thin_metadata = {
             "dataset_name": DATASET_NAME,
-            "method": "tail_item_cut",
+            "method": "head_item_cut",
             "parent_dataset": str(dense_output),
             "user_col": user_col,
             "item_col": item_col,
@@ -148,7 +162,7 @@ def main():
             metadata=thin_metadata,
         )
 
-        tail_report_rows.append(
+        head_report_rows.append(
             {"dataset": level_name, "keep_frac": keep_frac, **thin_metrics}
         )
 
@@ -160,9 +174,9 @@ def main():
         index=False
     )
 
-    tail_report_df = pd.DataFrame(tail_report_rows)
-    tail_report_df.to_csv(
-        f"data/reports/{DATASET_NAME}_k{K}_tail_item_sparsity_summary.csv",
+    head_report_df = pd.DataFrame(head_report_rows)
+    head_report_df.to_csv(
+        f"data/reports/{DATASET_NAME}_k{K}_head_item_sparsity_summary.csv",
         index=False
     )
 
