@@ -1,9 +1,21 @@
-from __future__ import annotations
-
+import json
 from pathlib import Path
+
 import pandas as pd
 
-from src.io_utils import save_json, load_json
+
+def save_json(data: dict, output_path: str | Path) -> None:
+    output_path = Path(output_path)
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+
+def load_json(input_path: str | Path) -> dict:
+    input_path = Path(input_path)
+
+    with open(input_path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def save_dataset_folder(
@@ -13,7 +25,7 @@ def save_dataset_folder(
     item_col: str,
     metadata: dict
 ) -> None:
-    
+
     """Lưu dataset đã chuẩn hóa thành folder với 4 file:
 - interactions.csv: chứa tất cả các record tương tác (customer_id, article_id)
 - users.csv: chứa danh sách người dùng
@@ -53,3 +65,45 @@ def load_dataset_folder(input_dir: str | Path) -> tuple[pd.DataFrame, dict]:
     metadata = load_json(metadata_path)
 
     return df, metadata
+
+
+def save_train_test_folder(
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    output_dir: str | Path,
+    user_col: str,
+    item_col: str,
+    metadata: dict,
+) -> None:
+    """Lưu dataset đã chia train/test thành folder với 5 file:
+- train.csv: chứa các record dùng để train model
+- test.csv: chứa các record dùng để evaluate model
+- users.csv: chứa danh sách người dùng trong train và test
+- items.csv: chứa danh sách sản phẩm trong train và test
+- metadata.json: chứa thông tin metadata bổ sung (nếu có)"""
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    train_path = output_dir / "train.csv"
+    test_path = output_dir / "test.csv"
+    users_path = output_dir / "users.csv"
+    items_path = output_dir / "items.csv"
+    metadata_path = output_dir / "metadata.json"
+
+    train_df.to_csv(train_path, index=False)
+    test_df.to_csv(test_path, index=False)
+
+    all_df = pd.concat([train_df, test_df], ignore_index=True)
+
+    (
+        pd.DataFrame({user_col: sorted(all_df[user_col].dropna().unique())})
+        .to_csv(users_path, index=False)
+    )
+
+    (
+        pd.DataFrame({item_col: sorted(all_df[item_col].dropna().unique())})
+        .to_csv(items_path, index=False)
+    )
+
+    save_json(metadata, metadata_path)

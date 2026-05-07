@@ -1,16 +1,17 @@
-from __future__ import annotations
 
 DATASET_CONFIG = {
     "hm": {
         "input_path": "data/raw/hm.csv",
         "user_col": "customer_id",
         "item_col": "article_id",
-        "default_k": 100,
+        "timestamp_col": "t_dat",
+        "default_k": 10,
     },
     "baby_product": {
         "input_path": "data/raw/baby_product.parquet",
         "user_col": "user_id",
         "item_col": "parent_asin",
+        "timestamp_col": "timestamp",
         "default_k": 5,
     }
 }
