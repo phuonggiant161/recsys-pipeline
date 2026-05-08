@@ -6,7 +6,11 @@ from src.io_utils import load_dataframe
 from src.kcore import make_k_core
 from src.preprocessing import deduplicate_user_item
 from src.splitting import userwise_temporal_split
-from src.thinning import generate_random_thinning_levels, generate_head_item_cut_levels
+from src.thinning import (
+    generate_random_thinning_levels,
+    generate_head_item_cut_levels,
+    generate_tail_item_cut_levels
+)
 from src.metrics import build_reference_stats, compute_sparsity_metrics
 from src.dataset_folder import save_dataset_folder, save_train_test_folder
 
@@ -16,17 +20,15 @@ from src.dataset_folder import save_dataset_folder, save_train_test_folder
 # TEST_SIZE = 0.2
 # KEEP_FRACS = [0.9, 0.7, 0.5, 0.3, 0.1]
 # SEED = 42
-# CUT_RATIO_PER_ROUND = 0.5
-# TOP_N_PER_ROUND = 1000 #500
 # DEDUP_USER_ITEM = True #chạy version bỏ duplicate interaction (true) hay giữ duplicate (false)
 
 DATASET_NAME = "hm" #hm
-K = 10 
+K = 10
 TEST_SIZE = 0.2
 KEEP_FRACS = [0.9, 0.7, 0.5, 0.3, 0.1]
 SEED = 42
-CUT_RATIO_PER_ROUND = 0.5
-TOP_N_PER_ROUND = 500
+# CUT_RATIO_PER_ROUND = 0.5
+# TOP_N_PER_ROUND = 500
 DEDUP_USER_ITEM = True #chạy version bỏ duplicate interaction (true) hay giữ duplicate (false)
 
 
@@ -226,10 +228,8 @@ def main():
         df=train_base,
         item_col=item_col,
         keep_fracs=KEEP_FRACS,
-        cut_ratio_per_round=CUT_RATIO_PER_ROUND,
-        top_n_per_round=TOP_N_PER_ROUND,
         seed=SEED
-    )
+)
 
     head_report_rows = []
 
@@ -282,6 +282,65 @@ def main():
             {"dataset": level_name, "keep_frac": keep_frac, **thin_metrics}
         )
 
+        print("Step 7: Tail-item thinning")
+    tail_outputs = generate_tail_item_cut_levels(
+        df=train_base,
+        item_col=item_col,
+        keep_fracs=KEEP_FRACS,
+        seed=SEED
+    )
+
+    tail_report_rows = []
+
+    tail_report_rows.append(
+        {"dataset": "base_train", "keep_frac": 1.0, **train_base_metrics}
+    )
+
+    # tính toán các metrics về sparsity cho từng tập train thưa được tạo ra
+    for level_name, thin_train_df in tail_outputs.items():
+        thin_metrics = compute_sparsity_metrics(
+            thin_train_df,
+            user_col=user_col,
+            item_col=item_col,
+            reference_stats=reference_stats
+        )
+
+        thin_output = output_root / f"{DATASET_NAME}_k{K}_{version_name}_{level_name}"
+        keep_frac = len(thin_train_df) / len(train_base)
+
+        thin_metadata = {
+            "dataset_name": DATASET_NAME,
+            "method": "tail_item_cut_train_only",
+            "parent_dataset": str(base_output),
+            "preprocessing_method": preprocessing_method,
+            "user_col": user_col,
+            "item_col": item_col,
+            "timestamp_col": timestamp_col,
+            "k": K,
+            "test_size": TEST_SIZE,
+            "split_method": "userwise_temporal_split",
+            "dedup_user_item": DEDUP_USER_ITEM,
+            "dedup_keep": "last" if DEDUP_USER_ITEM else None,
+            "keep_frac": keep_frac,
+            "reference_stats": reference_stats,
+            "train_metrics": thin_metrics,
+            "test_policy": "fixed_test_from_base_split",
+            "test_rows": int(len(test_base)),
+        }
+
+        save_train_test_folder(
+            train_df=thin_train_df,
+            test_df=test_base,
+            output_dir=thin_output,
+            user_col=user_col,
+            item_col=item_col,
+            metadata=thin_metadata,
+        )
+
+        tail_report_rows.append(
+            {"dataset": level_name, "keep_frac": keep_frac, **thin_metrics}
+        )
+
     Path("data/reports").mkdir(parents=True, exist_ok=True)
 
     random_report_df = pd.DataFrame(random_report_rows)
@@ -293,6 +352,12 @@ def main():
     head_report_df = pd.DataFrame(head_report_rows)
     head_report_df.to_csv(
         f"data/reports/{DATASET_NAME}_k{K}_{version_name}_head_item_train_sparsity_summary.csv",
+        index=False
+    )
+
+    tail_report_df = pd.DataFrame(tail_report_rows)
+    tail_report_df.to_csv(
+        f"data/reports/{DATASET_NAME}_k{K}_{version_name}_tail_item_train_sparsity_summary.csv",
         index=False
     )
 

@@ -45,185 +45,219 @@ def generate_random_thinning_levels(
 
     return outputs
 
-#C2: cut có kiểm soát
 
+#C2: Cut top item bằng cách đặt trần cap
 def head_item_cut(
     df: pd.DataFrame,
     item_col: str,
     keep_frac: float,
-    cut_ratio_per_round: float = 0.3,
-    top_n_per_round: int = 100,
     seed: int = 42
 ) -> pd.DataFrame:
     """
-    Cắt dữ liệu theo hướng kiểm soát distribution bằng cách ưu tiên cắt nhóm head item.
+    Cut top item bằng cách đặt trần số interaction tối đa cho mỗi item.
 
     Logic:
-    - Tính số interaction cần giữ theo keep_frac.
-    - Trong mỗi vòng:
-        1. Đếm lại số interaction của từng item trên dữ liệu còn lại.
-        2. Rank item theo số interaction giảm dần.
-        3. Chọn top_n_per_round item phổ biến nhất hiện tại.
-        4. Với mỗi item trong nhóm head, cắt cut_ratio_per_round interaction.
-        5. Rank lại trên dữ liệu còn lại và tiếp tục lặp.
-    - Dừng khi số interaction còn lại đạt mức cần giữ.
-
-    Ví dụ:
-    keep_frac = 0.1 nghĩa là giữ lại khoảng 10% interaction ban đầu.
-    cut_ratio_per_round = 0.5 nghĩa là mỗi vòng cắt 50% interaction
-    của từng item trong nhóm head hiện tại.
-    top_n_per_round = 500 nghĩa là mỗi vòng xử lý 500 item phổ biến nhất.
-
-    Lưu ý:
-    - Đây là phiên bản batch của head thinning.
-    - Thay vì mỗi vòng chỉ cắt 1 item top, hàm này cắt nhiều head item cùng lúc
-      để giảm số vòng lặp trên dataset lớn.
+    - Tính số interaction cần giữ lại theo keep_frac.
+    - Đếm số interaction của từng item.
+    - Thử cap lần lượt từ 1, 2, 3,... cho đến khi đủ số dòng cần giữ.
+    - Với mỗi item, số dòng được giữ tối đa là cap.
+    - Nếu cap cuối cùng làm số dòng giữ lại bị vượt target,
+      thì giữ cap - 1 trước, sau đó random thêm phần còn thiếu.
     """
 
+    n_keep = int(round(len(df) * keep_frac))
 
-    # Số interaction ban đầu.
-    n_original = len(df)
-
-    # Số interaction cần giữ lại sau khi cắt.
-
-    n_keep = int(round(n_original * keep_frac))
-
-    # Tổng số interaction cần loại bỏ.
-    n_remove_total = n_original - n_keep
-
-    # Nếu không cần cắt thì trả về bản copy của dữ liệu gốc.
-    if n_remove_total <= 0:
+    #nếu n_keep >= records df thì không cắt gì, còn nếu n_keep < 0 thì trả về rỗng
+    if n_keep >= len(df):
         return df.copy().reset_index(drop=True)
 
-    # Khởi tạo random generator để việc chọn dòng cần xóa có thể tái lập.
-    # Cùng seed thì kết quả cắt sẽ giống nhau.
+    if n_keep <= 0:
+        return df.iloc[0:0].copy().reset_index(drop=True)
+
+    #tạo bộ random để random chọn item được cắt ở cap cuối
     rng = np.random.default_rng(seed)
 
-    # remaining_df là dữ liệu sẽ bị cắt dần qua từng vòng.
-    remaining_df = df.copy().reset_index(drop=True)
+    # đếm số interaction theo item
+    item_counts = (
+        df.groupby(item_col)
+          .size()
+          .sort_values(ascending=False)
+    )
+    # tìm max interaction của tất cả item để chạy loop từ 1 --> max
+    max_count = int(item_counts.max())
 
-    # Theo dõi tổng số dòng đã bị loại bỏ.
-    removed_count = 0
+    # thử cap lần lượt từ 1, 2, 3,... cho đến khi đủ số dòng cần giữ
+    selected_cap = max_count
 
-    # Lặp đến khi đã cắt đủ số dòng cần cắt
-    # hoặc số dòng còn lại đã bằng số dòng cần giữ.
-    while removed_count < n_remove_total and len(remaining_df) > n_keep:
+    for cap in range(1, max_count + 1):
+        total_keep = int(np.minimum(item_counts.values, cap).sum())
 
-        # Đếm lại số interaction theo từng item trên dữ liệu hiện tại.
-        # Sau mỗi vòng cắt, popularity của item có thể thay đổi,
-        # nên cần groupby lại.
-        item_counts = (
-            remaining_df.groupby(item_col)
-            .size()
-            .sort_values(ascending=False)
-        )
-
-        # Nếu không còn item nào thì dừng.
-        if item_counts.empty:
+        if total_keep >= n_keep:
+            selected_cap = cap
             break
 
-        # Chọn nhóm item phổ biến nhất hiện tại.
-        head_items = item_counts.head(top_n_per_round)
+    cap = selected_cap
 
-        # Số dòng còn cần cắt trong toàn bộ quá trình.
-        remaining_to_remove = n_remove_total - removed_count
+    # giữ chắc chắn cap - 1 interaction trước
+    if cap > 1:
+        keep_quota = item_counts.clip(upper=cap - 1).astype(int)
+    else:
+        keep_quota = pd.Series(0, index=item_counts.index, dtype=int)
 
-        # Danh sách index các dòng sẽ bị xóa trong vòng hiện tại.
-        remove_indices = []
+    current_keep = int(keep_quota.sum())
+    remaining_keep = n_keep - current_keep
 
-        # Duyệt qua từng item trong nhóm head item.
-        for item, count in head_items.items():
+    # các item có count >= cap là những item còn có thể giữ thêm 1 dòng
+    eligible_items = item_counts[item_counts >= cap].index.to_numpy()
 
-            # Nếu đã đủ số dòng cần cắt thì dừng vòng for.
-            if remaining_to_remove <= 0:
-                break
-
-            # Lấy index của tất cả interaction thuộc item hiện tại.
-            item_idx = remaining_df.index[
-                remaining_df[item_col] == item
-            ].to_numpy()
-
-            # Tính số interaction sẽ cắt khỏi item này.
-            # Ví dụ item có 8,000 interaction,
-            # cut_ratio_per_round = 0.5
-            # thì cắt khoảng 4,000 interaction của item đó.
-            n_remove_this_item = int(round(count * cut_ratio_per_round))
-
-            # Đảm bảo mỗi item được chọn sẽ bị cắt ít nhất 1 dòng.
-            # Nếu không có dòng này, khi count nhỏ, round có thể ra 0
-            # và vòng lặp có thể không tiến triển.
-            n_remove_this_item = max(1, n_remove_this_item)
-
-            # Không cắt vượt quá tổng số dòng còn cần cắt.
-            n_remove_this_item = min(
-                n_remove_this_item,
-                remaining_to_remove
-            )
-
-            # Không cắt vượt quá số interaction hiện có của item.
-            n_remove_this_item = min(
-                n_remove_this_item,
-                len(item_idx)
-            )
-
-            # Random chọn các interaction của item này để xóa.
-            # Không dùng item_idx[:n] để tránh phụ thuộc vào thứ tự dòng ban đầu,
-            # đặc biệt nếu dữ liệu đang được sắp theo thời gian.
-            chosen_idx = rng.choice(
-                item_idx,
-                size=n_remove_this_item,
-                replace=False
-            )
-
-            # Thêm index vừa chọn vào danh sách xóa của vòng hiện tại.
-            remove_indices.extend(chosen_idx.tolist())
-
-            # Cập nhật số dòng còn cần xóa.
-            remaining_to_remove -= n_remove_this_item
-
-        # Nếu vì lý do nào đó không chọn được dòng nào để xóa thì dừng,
-        # tránh vòng lặp vô hạn.
-        if len(remove_indices) == 0:
-            break
-
-        # Xóa toàn bộ các dòng đã chọn trong vòng hiện tại.
-        # Reset index để dataframe gọn lại cho vòng sau.
-        remaining_df = (
-            remaining_df.drop(index=remove_indices)
-            .reset_index(drop=True)
+    if remaining_keep > 0:
+        chosen_items = rng.choice(
+            eligible_items,
+            size=remaining_keep,
+            replace=False
         )
 
-        # Cập nhật tổng số dòng đã xóa.
-        removed_count += len(remove_indices)
+        for item in chosen_items:
+            keep_quota.loc[item] += 1
 
-    # Trả về dữ liệu sau khi thinning.
-    return remaining_df.reset_index(drop=True)
+    keep_indices = []
+
+    for item, quota in keep_quota.items():
+        if quota <= 0:
+            continue
+
+        item_idx = df.index[df[item_col] == item].to_numpy()
+
+        chosen_idx = rng.choice(
+            item_idx,
+            size=int(quota),
+            replace=False
+        )
+
+        keep_indices.extend(chosen_idx.tolist())
+
+    thin_df = (
+        df.loc[sorted(keep_indices)]
+          .copy()
+          .reset_index(drop=True)
+    )
+
+    return thin_df
 
 
 def generate_head_item_cut_levels(
     df: pd.DataFrame,
     item_col: str,
     keep_fracs: list[float],
-    cut_ratio_per_round: float = 0.3,
-    top_n_per_round: int = 500,
     seed: int = 42
 ) -> dict[str, pd.DataFrame]:
     """
-    Gen nhiều dataset theo nhiều mức keep_frac bằng phương pháp:
-    cắt nhóm item head theo vòng lặp, sau mỗi vòng rank lại item.
+    Gen nhiều dataset tương ứng với list keep_frac bằng cách top cut.
     """
-
     outputs = {}
 
     for i, keep_frac in enumerate(keep_fracs, start=1):
-        level_name = f"iter_head_item_keep_{keep_frac:.2f}"
+        level_name = f"top_item_keep_{keep_frac:.2f}"
 
         outputs[level_name] = head_item_cut(
             df=df,
             item_col=item_col,
             keep_frac=keep_frac,
-            cut_ratio_per_round=cut_ratio_per_round,
-            top_n_per_round=top_n_per_round,
+            seed=seed + i
+        )
+
+    return outputs
+
+
+#C3: Cut tail item
+def tail_item_cut(
+    df: pd.DataFrame,
+    item_col: str,
+    keep_frac: float,
+    seed: int = 42
+) -> pd.DataFrame:
+    """
+    Cut tail item bằng cách cắt sạch item ít interaction trước.
+
+    Logic:
+    - Tính số interaction cần giữ lại theo keep_frac.
+    - Tính số interaction cần xóa.
+    - Sắp xếp item theo số interaction tăng dần.
+    - Cắt sạch tail item cho đến khi đủ số lượng cần xóa.
+    - Nếu item cuối cùng làm vượt số lượng cần xóa,
+      thì chỉ random xóa một phần interaction của item đó.
+    """
+
+    n_keep = int(round(len(df) * keep_frac))
+    n_remove = len(df) - n_keep
+
+    if n_remove <= 0:
+        return df.copy().reset_index(drop=True)
+
+    if n_keep <= 0:
+        return df.iloc[0:0].copy().reset_index(drop=True)
+
+    rng = np.random.default_rng(seed)
+
+    # đếm số interaction theo item, item ít interaction đứng trước
+    item_counts = (
+        df.groupby(item_col)
+          .size()
+          .sort_values(ascending=True)
+    )
+
+    remove_indices = []
+    remaining_remove = n_remove
+
+    for item, count in item_counts.items():
+        if remaining_remove <= 0:
+            break
+
+        item_idx = df.index[df[item_col] == item].to_numpy()
+
+        # nếu cắt sạch item này vẫn chưa vượt số dòng cần xóa
+        if count <= remaining_remove:
+            remove_indices.extend(item_idx.tolist())
+            remaining_remove -= int(count)
+
+        # nếu cắt sạch item này bị vượt thì chỉ xóa một phần
+        else:
+            chosen_idx = rng.choice(
+                item_idx,
+                size=remaining_remove,
+                replace=False
+            )
+
+            remove_indices.extend(chosen_idx.tolist())
+            remaining_remove = 0
+
+    thin_df = (
+        df.drop(index=remove_indices)
+          .copy()
+          .reset_index(drop=True)
+    )
+
+    return thin_df
+
+
+def generate_tail_item_cut_levels(
+    df: pd.DataFrame,
+    item_col: str,
+    keep_fracs: list[float],
+    seed: int = 42
+) -> dict[str, pd.DataFrame]:
+    """
+    Gen nhiều dataset tương ứng với list keep_frac bằng cách tail cut.
+    """
+    outputs = {}
+
+    for i, keep_frac in enumerate(keep_fracs, start=1):
+        level_name = f"tail_item_keep_{keep_frac:.2f}"
+
+        outputs[level_name] = tail_item_cut(
+            df=df,
+            item_col=item_col,
+            keep_frac=keep_frac,
             seed=seed + i
         )
 
