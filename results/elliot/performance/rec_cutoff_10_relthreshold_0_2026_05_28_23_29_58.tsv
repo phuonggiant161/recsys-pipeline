@@ -1,2 +1,0 @@
-model	Precision	Recall	nDCG	MAP	MRR
-ItemKNN_nn=40_sim=cosine_imp=standard_bin=False_shrink=0_norm=True_asymalpha=_tvalpha=_tvbeta=_rweights=	0.026623357706761445	0.04519311780608988	0.04480334039117201	0.03672559455026609	0.09754574468429453

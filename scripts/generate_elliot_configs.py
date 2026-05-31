@@ -13,9 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 CONFIG_OUT_DIR = PROJECT_ROOT / "external" / "elliot" / "config_files"
 
-RESULTS_RECS = "../../../results/elliot/recs/"
-RESULTS_PERF = "../../../results/elliot/performance/"
-RESULTS_LOGS = "../../../results/elliot/logs/"
+RESULTS_BASE = "../../../results/elliot"
 
 
 def make_config(folder_name: str) -> str:
@@ -34,9 +32,9 @@ experiment:
     cutoffs: [10, 20]
     simple_metrics: [Precision, Recall, nDCG, MAP, MRR, Precision_u1, Recall_u1, nDCG_u1, MAP_u1, MRR_u1]
 
-  path_output_rec_result: {RESULTS_RECS}
-  path_output_rec_performance: {RESULTS_PERF}
-  path_log_folder: {RESULTS_LOGS}
+  path_output_rec_result: {RESULTS_BASE}/{folder_name}/recs/
+  path_output_rec_performance: {RESULTS_BASE}/{folder_name}/performance/
+  path_log_folder: {RESULTS_BASE}/{folder_name}/logs/
 
   gpu: -1
 
@@ -50,8 +48,7 @@ experiment:
 
 
 def ensure_results_dirs() -> None:
-    for subdir in ("recs", "performance", "logs"):
-        (PROJECT_ROOT / "results" / "elliot" / subdir).mkdir(parents=True, exist_ok=True)
+    (PROJECT_ROOT / "results" / "elliot").mkdir(parents=True, exist_ok=True)
 
 
 def main() -> None:

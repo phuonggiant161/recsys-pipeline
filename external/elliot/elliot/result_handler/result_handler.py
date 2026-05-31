@@ -38,6 +38,7 @@ class ResultHandler:
         self.oneshot_recommenders[kwargs["name"]] = [kwargs]
 
     def save_best_results(self, output=''):
+        os.makedirs(output, exist_ok=True)
         global_results = dict(self.oneshot_recommenders)
         for k in self.ks:
             results = {}
@@ -65,6 +66,7 @@ class ResultHandler:
                 sep='\t', index=False, header=["model", "metric", "value"])
 
     def save_best_models(self, output='../results/', default_metric = "nDCG", default_k = [10]):
+        os.makedirs(output, exist_ok=True)
         global_results = dict(self.oneshot_recommenders)
         k = default_k[0]
         models = [{"default_validation_metric": default_metric,

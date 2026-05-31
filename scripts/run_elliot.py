@@ -24,6 +24,17 @@ ELLIOT_DIR = PROJECT_ROOT / "external" / "elliot"
 CONFIG_DIR = ELLIOT_DIR / "config_files"
 
 
+def get_python() -> str:
+    """Use venv_elliot if it exists, otherwise fall back to current Python."""
+    for candidate in [
+        ELLIOT_DIR / "venv_elliot" / "Scripts" / "python.exe",  # Windows
+        ELLIOT_DIR / "venv_elliot" / "bin" / "python",          # Linux/Mac
+    ]:
+        if candidate.exists():
+            return str(candidate)
+    return sys.executable
+
+
 def collect_configs(filter_text: str, specific: list[str]) -> list[str]:
     """Return list of config stems to run, in sorted order."""
     if specific:
@@ -37,7 +48,7 @@ def collect_configs(filter_text: str, specific: list[str]) -> list[str]:
 
 def run_one(stem: str, dry_run: bool) -> bool:
     """Run a single experiment. Returns True on success."""
-    cmd = [sys.executable, "start_experiments.py", "--config", stem]
+    cmd = [get_python(), "start_experiments.py", "--config", stem]
     print(f"\n{'[DRY-RUN] ' if dry_run else ''}Running: {stem}")
     print(f"  cmd : {' '.join(cmd)}")
     print(f"  cwd : {ELLIOT_DIR}")

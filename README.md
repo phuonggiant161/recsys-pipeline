@@ -22,13 +22,13 @@ recsys-pipeline/
 ├── scripts/
 │   ├── generate_elliot_configs.py # Tự sinh Elliot config từ data/processed/
 │   └── run_elliot.py              # Chạy Elliot experiments từ repo root
-├── external/elliot/               # Elliot framework (submodule)
+├── external/elliot/               # Elliot framework
 ├── data/
 │   ├── raw/                       # Dữ liệu thô (không commit)
 │   ├── processed/                 # Output của main.py (không commit)
 │   └── reports/                   # Sparsity summary CSV (commit)
 └── results/elliot/
-    └── performance/               # Kết quả metrics của Elliot (commit)
+    └── {tên_dataset}/performance/ # Kết quả metrics của Elliot (commit)
 ```
 
 ---
@@ -47,80 +47,56 @@ data/raw/baby_product.parquet
 
 ---
 
-## Cài đặt
+## Cài đặt (1 lần duy nhất)
 
-### 1. Pipeline chính (preprocessing + thinning)
+### 0. Windows — cho phép chạy script (nếu chưa làm)
 
-```bash
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
-### 2. Elliot (training + evaluation)
-
-Elliot yêu cầu Python environment riêng do dùng các thư viện cũ (numpy 1.18, tensorflow 2.3):
+### 1. Cài thư viện
 
 ```bash
-cd external/elliot
-python -m venv venv_elliot
-venv_elliot\Scripts\activate
 pip install -r requirements.txt
-pip install -e .
+pip install -e external/elliot/ --no-deps
 ```
 
 ---
 
 ## Chạy pipeline
 
-### Bước 1 — Preprocessing và thinning
+Sau khi cài đặt xong, mỗi lần chạy chỉ cần **3 lệnh**:
 
-Cấu hình tham số trong `main.py` (đầu file):
+```bash
+python main.py                               # Bước 1: sinh data/processed/
+python scripts/generate_elliot_configs.py    # Bước 2: sinh Elliot config YAML
+python scripts/run_elliot.py                 # Bước 3: chạy Elliot
+```
 
+### Tùy chọn thêm
+
+**Bước 1** — cấu hình tham số trong `main.py` (đầu file) trước khi chạy:
 ```python
 DATASET_NAME = "hm"   # hoặc "baby_product"
 K = 20                # k-core
 KEEP_FRACS = [0.9, 0.7, 0.5, 0.3, 0.1]
 ```
 
+**Bước 2** — các flag hữu ích:
 ```bash
-python main.py
+python scripts/generate_elliot_configs.py --filter hm_k20   # chỉ gen subset
+python scripts/generate_elliot_configs.py --overwrite        # gen lại toàn bộ
 ```
 
-Output: `data/processed/hm_k20_*/` — mỗi folder chứa `train.csv`, `test.csv`, `train.tsv`, `test.tsv`, `metadata.json`.
-
-### Bước 2 — Sinh Elliot config
-
+**Bước 3** — các flag hữu ích:
 ```bash
-# Sinh config cho tất cả dataset trong data/processed/
-python scripts/generate_elliot_configs.py
-
-# Chỉ sinh cho một subset
-python scripts/generate_elliot_configs.py --filter hm_k20
-
-# Ghi đè config đã có
-python scripts/generate_elliot_configs.py --overwrite
+python scripts/run_elliot.py --filter hm_k20_random          # chỉ chạy subset
+python scripts/run_elliot.py --config hm_k20_dedup_base_split_itemknn  # 1 experiment
+python scripts/run_elliot.py --filter hm_k20 --dry-run       # xem lệnh, không chạy thật
 ```
 
-Config được lưu vào `external/elliot/config_files/`.
-
-### Bước 3 — Chạy Elliot
-
-```bash
-# Chạy tất cả experiments
-python scripts/run_elliot.py
-
-# Chỉ chạy một subset
-python scripts/run_elliot.py --filter hm_k20_random
-
-# Chạy experiment cụ thể
-python scripts/run_elliot.py --config hm_k20_dedup_base_split_itemknn
-
-# Xem command sẽ chạy mà không thực thi
-python scripts/run_elliot.py --filter hm_k20 --dry-run
-```
-
-Kết quả ghi vào `results/elliot/performance/`.
+Kết quả ghi vào `results/elliot/{tên_dataset}/performance/`.
 
 ---
 
