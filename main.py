@@ -23,13 +23,14 @@ from src.dataset_folder import save_dataset_folder, save_train_test_folder
 # DEDUP_USER_ITEM = True #chạy version bỏ duplicate interaction (true) hay giữ duplicate (false)
 
 DATASET_NAME = "hm" #hm
-K = 10
+K = 20
 TEST_SIZE = 0.2
 KEEP_FRACS = [0.9, 0.7, 0.5, 0.3, 0.1]
 SEED = 42
 # CUT_RATIO_PER_ROUND = 0.5
 # TOP_N_PER_ROUND = 500
 DEDUP_USER_ITEM = True #chạy version bỏ duplicate interaction (true) hay giữ duplicate (false)
+
 
 
 
@@ -165,8 +166,13 @@ def main():
     # thưa hóa dataset bằng cách random thưa hóa với các mức độ thưa khác nhau dựa trên tập train đã tạo ở bước trước
     print("Step 5: Random thinning")
     thinning_outputs = generate_random_thinning_levels(
-        df=train_base, keep_fracs=KEEP_FRACS, seed=SEED
-    )
+        df=train_base,
+        keep_fracs=KEEP_FRACS,
+        seed=SEED,
+        user_col=user_col,
+        timestamp_col=timestamp_col,
+        protect_first_interaction=True
+)
 
     random_report_rows = []
 
@@ -183,7 +189,7 @@ def main():
             reference_stats=reference_stats,
         )
 
-        thin_output = output_root / f"{DATASET_NAME}_k{K}_{version_name}_random_{level_name}"
+        thin_output = output_root / f"{DATASET_NAME}_k{K}_random_{level_name}"
         keep_frac = len(thin_train_df) / len(train_base)
 
         thin_metadata = {
@@ -228,7 +234,10 @@ def main():
         df=train_base,
         item_col=item_col,
         keep_fracs=KEEP_FRACS,
-        seed=SEED
+        seed=SEED,
+        user_col=user_col,
+        timestamp_col=timestamp_col,
+        protect_first_interaction=True
 )
 
     head_report_rows = []
@@ -246,7 +255,7 @@ def main():
             reference_stats=reference_stats
         )
 
-        thin_output = output_root / f"{DATASET_NAME}_k{K}_{version_name}_{level_name}"
+        thin_output = output_root / f"{DATASET_NAME}_k{K}_head_{level_name}"
         keep_frac = len(thin_train_df) / len(train_base)
 
         thin_metadata = {
@@ -282,13 +291,16 @@ def main():
             {"dataset": level_name, "keep_frac": keep_frac, **thin_metrics}
         )
 
-        print("Step 7: Tail-item thinning")
+    print("Step 7: Tail-item thinning")
     tail_outputs = generate_tail_item_cut_levels(
         df=train_base,
         item_col=item_col,
         keep_fracs=KEEP_FRACS,
-        seed=SEED
-    )
+        seed=SEED,
+        user_col=user_col,
+        timestamp_col=timestamp_col,
+        protect_first_interaction=True
+)
 
     tail_report_rows = []
 
@@ -305,7 +317,7 @@ def main():
             reference_stats=reference_stats
         )
 
-        thin_output = output_root / f"{DATASET_NAME}_k{K}_{version_name}_{level_name}"
+        thin_output = output_root / f"{DATASET_NAME}_k{K}_tail_{level_name}"
         keep_frac = len(thin_train_df) / len(train_base)
 
         thin_metadata = {
@@ -345,19 +357,19 @@ def main():
 
     random_report_df = pd.DataFrame(random_report_rows)
     random_report_df.to_csv(
-        f"data/reports/{DATASET_NAME}_k{K}_{version_name}_random_train_sparsity_summary.csv",
+        f"data/reports/{DATASET_NAME}_k{K}_random_summary.csv",
         index=False
     )
 
     head_report_df = pd.DataFrame(head_report_rows)
     head_report_df.to_csv(
-        f"data/reports/{DATASET_NAME}_k{K}_{version_name}_head_item_train_sparsity_summary.csv",
+        f"data/reports/{DATASET_NAME}_k{K}_head_summary.csv",
         index=False
     )
 
     tail_report_df = pd.DataFrame(tail_report_rows)
     tail_report_df.to_csv(
-        f"data/reports/{DATASET_NAME}_k{K}_{version_name}_tail_item_train_sparsity_summary.csv",
+        f"data/reports/{DATASET_NAME}_k{K}_tail_summary.csv",
         index=False
     )
 

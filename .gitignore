@@ -4,7 +4,14 @@ __pycache__/
 
 data/raw/*
 data/processed/*
+results/elliot/recs/*
+results/elliot/logs/*
+
+*.csv
+*.tsv
 
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/reports/.gitkeep
+!data/reports/*.csv
+!results/elliot/performance/*.tsv

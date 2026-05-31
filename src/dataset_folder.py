@@ -94,6 +94,27 @@ def save_train_test_folder(
     train_df.to_csv(train_path, index=False)
     test_df.to_csv(test_path, index=False)
 
+    # chuyển sang format chuẩn tsv của elliot
+    train_elliot = train_df[[user_col, item_col]].drop_duplicates().copy()
+    test_elliot = test_df[[user_col, item_col]].drop_duplicates().copy()
+
+    train_elliot["rating"] = 1
+    test_elliot["rating"] = 1
+
+    train_elliot.to_csv(
+        output_dir / "train.tsv",
+        sep="\t",
+        index=False,
+        header=False
+    )
+
+    test_elliot.to_csv(
+        output_dir / "test.tsv",
+        sep="\t",
+        index=False,
+        header=False
+    )
+
     all_df = pd.concat([train_df, test_df], ignore_index=True)
 
     (
@@ -107,3 +128,4 @@ def save_train_test_folder(
     )
 
     save_json(metadata, metadata_path)
+
