@@ -1,0 +1,2 @@
+model	Precision	Recall	nDCG	MAP	MRR	Precision_u1	Recall_u1	nDCG_u1	MAP_u1	MRR_u1
+ItemKNN_nn=40_sim=cosine_imp=standard_bin=False_shrink=0_norm=True_asymalpha=_tvalpha=_tvbeta=_rweights=	0.012080869286567425	0.020107165937491917	0.021015573020733085	0.017840522824136302	0.05053814827608051	0.0	0.0	0.0	0.0	0.0

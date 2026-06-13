@@ -76,11 +76,24 @@ python scripts/run_elliot.py                 # Bước 3: chạy Elliot
 
 ### Tùy chọn thêm
 
-**Bước 1** — cấu hình tham số trong `main.py` (đầu file) trước khi chạy:
+**Bước 1** — có thể sửa tham số trực tiếp trong `main.py` (đầu file) hoặc truyền qua CLI:
+
+Cách 1 — sửa constants trong file:
 ```python
-DATASET_NAME = "hm"   # hoặc "baby_product"
-K = 20                # k-core
-KEEP_FRACS = [0.9, 0.7, 0.5, 0.3, 0.1]
+DATASET_NAME = "hm"     # hoặc "baby_product"
+K_USER       = 20       # k-core: min interactions per user
+K_ITEM       = 20       # k-core: min interactions per item
+KEEP_FRACS   = [0.9, 0.7, 0.5, 0.3, 0.1]
+```
+
+Cách 2 — truyền qua CLI (override constants):
+```bash
+# k_user = k_item = 20 (backward compat)
+python main.py --dataset hm --k 20
+
+# k_user và k_item khác nhau
+python main.py --dataset hm --k-user 10 --k-item 30
+python main.py --dataset baby_product --k-user 3 --k-item 10
 ```
 
 **Bước 2** — các flag hữu ích:
@@ -97,6 +110,28 @@ python scripts/run_elliot.py --filter hm_k20 --dry-run       # xem lệnh, khôn
 ```
 
 Kết quả ghi vào `results/elliot/{tên_dataset}/performance/`.
+
+---
+
+## Eval-only mode (chạy lại evaluation không train lại)
+
+Dùng khi đã có rec files từ lần train trước và muốn tính lại metrics (ví dụ sau khi thêm metric mới).
+
+```bash
+# Bước 1: sinh eval-only configs (chỉ gen cho dataset đã có rec files)
+python scripts/generate_elliot_configs.py --eval-only
+
+# Bước 2: chạy evaluation
+python scripts/run_elliot.py --eval-only
+
+# Hoặc chỉ một subset
+python scripts/generate_elliot_configs.py --eval-only --filter hm_k20
+python scripts/run_elliot.py --eval-only --filter hm_k20
+```
+
+Eval-only configs được lưu tại `external/elliot/config_files_eval/` (tách biệt với train configs).
+Dùng `RecommendationFolder` để đọc rec files có sẵn trong `results/elliot/{dataset}/recs/` —
+**không train lại model**, không ghi đè rec files cũ.
 
 ---
 

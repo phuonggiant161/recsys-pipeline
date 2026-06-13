@@ -24,5 +24,5 @@ from .algebric import SlopeOne
 # from .content_based import VSM
 # from .adversarial import AMF, AMR
 # from .gan import IRGAN, CFGAN
-# from .generic import ProxyRecommender
+from .generic import ProxyRecommender
 

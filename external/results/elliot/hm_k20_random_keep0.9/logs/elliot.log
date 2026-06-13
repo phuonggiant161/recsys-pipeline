@@ -1,0 +1,46 @@
+2026-06-06 16:34:35.682780: I Start experiment
+2026-06-06 16:34:36.541257: I D:\recsys-pipeline\data\processed\hm_k20_random_keep0.9\train.tsv - Loaded
+2026-06-06 16:34:37.026010: I Test Fold 0
+2026-06-06 17:20:36.584851: I Statistics	Users:	34327	Items:	11759	Transactions:	729824	Sparsity:	0.9981919439043997
+2026-06-06 17:26:47.282112: I Training begun for ItemKNN\n
+2026-06-06 17:26:47.282112: I Hyperparameters:
+2026-06-06 17:26:47.282112: I meta set to namespace(save_recs=True)
+2026-06-06 17:26:47.283111: I neighbors set to 40
+2026-06-06 17:26:47.283111: I similarity set to cosine
+2026-06-06 17:26:47.283111: I Exploration: Test Fold exploration number 1
+2026-06-06 17:26:47.283111: I Exploration: Train-Validation Fold exploration number 1
+2026-06-06 17:36:58.258961: I 
+2026-06-06 17:36:58.274979: I Test Evaluation results
+2026-06-06 17:36:58.305966: I Cut-off: 10
+2026-06-06 17:36:58.321957: I Eval Time: 2.3585071563720703
+2026-06-06 17:36:58.337958: I Results
+2026-06-06 17:36:58.368519: I Precision	0.02453
+2026-06-06 17:36:58.399519: I Recall	0.04164
+2026-06-06 17:36:58.431501: I nDCG	0.04092
+2026-06-06 17:36:58.463596: I MAP	0.0334
+2026-06-06 17:36:58.495579: I MRR	0.08941
+2026-06-06 17:36:58.527579: I Precision_u1	nan
+2026-06-06 17:36:58.542590: I Recall_u1	nan
+2026-06-06 17:36:58.573129: I nDCG_u1	nan
+2026-06-06 17:36:58.605127: I MAP_u1	nan
+2026-06-06 17:36:58.605127: I MRR_u1	nan
+2026-06-06 17:37:02.775894: I 
+2026-06-06 17:37:02.776895: I Test Evaluation results
+2026-06-06 17:37:02.776895: I Cut-off: 20
+2026-06-06 17:37:02.777897: I Eval Time: 4.527477025985718
+2026-06-06 17:37:02.778897: I Results
+2026-06-06 17:37:02.779895: I Precision	0.01813
+2026-06-06 17:37:02.779895: I Recall	0.06105
+2026-06-06 17:37:02.780894: I nDCG	0.0494
+2026-06-06 17:37:02.783892: I MAP	0.02698
+2026-06-06 17:37:02.787892: I MRR	0.09462
+2026-06-06 17:37:02.790893: I Precision_u1	nan
+2026-06-06 17:37:02.791894: I Recall_u1	nan
+2026-06-06 17:37:02.792893: I nDCG_u1	nan
+2026-06-06 17:37:02.792893: I MAP_u1	nan
+2026-06-06 17:37:02.793892: I MRR_u1	nan
+2026-06-06 17:37:06.201003: I Training ended for ItemKNN
+2026-06-06 17:37:06.201003: I Loss:\t-0.024525883415387303
+2026-06-06 17:37:06.201003: I Best Model params:\t{'meta': namespace(save_recs=True), 'neighbors': 40, 'similarity': 'cosine', 'name': 'ItemKNN_nn=40_sim=cosine_imp=standard_bin=False_shrink=0_norm=True_asymalpha=_tvalpha=_tvbeta=_rweights='}
+2026-06-06 17:37:06.201983: I Best Model results:\t{10: {'Precision': np.float64(0.024525883415387303), 'Recall': np.float64(0.0416432773460528), 'nDCG': np.float64(0.04091996860935525), 'MAP': np.float64(0.03340124576840573), 'MRR': np.float64(0.08941069110760606), 'Precision_u1': np.float64(nan), 'Recall_u1': np.float64(nan), 'nDCG_u1': np.float64(nan), 'MAP_u1': np.float64(nan), 'MRR_u1': np.float64(nan)}, 20: {'Precision': np.float64(0.018134413144172225), 'Recall': np.float64(0.06104519367207478), 'nDCG': np.float64(0.04940395767789104), 'MAP': np.float64(0.026979486278878646), 'MRR': np.float64(0.09462352862026921), 'Precision_u1': np.float64(nan), 'Recall_u1': np.float64(nan), 'nDCG_u1': np.float64(nan), 'MAP_u1': np.float64(nan), 'MRR_u1': np.float64(nan)}}
+2026-06-06 17:37:06.287476: I End experiment

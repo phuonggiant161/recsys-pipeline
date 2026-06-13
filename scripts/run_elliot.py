@@ -2,17 +2,20 @@
 Run Elliot experiments from the repo root.
 
 Usage:
-    # Run all generated *_itemknn configs
+    # Train + evaluate (ItemKNN)
     python scripts/run_elliot.py
-
-    # Filter by substring in config name
     python scripts/run_elliot.py --filter hm_k20
-
-    # Run specific configs (stem name, no .yml)
     python scripts/run_elliot.py --config hm_k20_dedup_base_split_itemknn hm_k20_random_keep0.5_itemknn
-
-    # Preview without running
     python scripts/run_elliot.py --filter hm_k20 --dry-run
+
+    # Eval-only (RecommendationFolder, requires existing rec files)
+    python scripts/run_elliot.py --eval-only
+    python scripts/run_elliot.py --eval-only --filter hm_k20
+    python scripts/run_elliot.py --eval-only --config hm_k20_random_keep0.1_eval
+    python scripts/run_elliot.py --eval-only --filter hm_k20 --dry-run
+
+    Note: generate eval-only configs first with:
+        python scripts/generate_elliot_configs.py --eval-only
 """
 import argparse
 import subprocess
@@ -22,6 +25,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ELLIOT_DIR = PROJECT_ROOT / "external" / "elliot"
 CONFIG_DIR = ELLIOT_DIR / "config_files"
+EVAL_CONFIG_DIR = ELLIOT_DIR / "config_files_eval"
 
 
 def get_python() -> str:
@@ -35,23 +39,33 @@ def get_python() -> str:
     return sys.executable
 
 
-def collect_configs(filter_text: str, specific: list[str]) -> list[str]:
+def collect_configs(filter_text: str, specific: list[str], eval_only: bool) -> list[str]:
     """Return list of config stems to run, in sorted order."""
     if specific:
         return sorted(specific)
 
-    stems = sorted(p.stem for p in CONFIG_DIR.glob("*.yml"))
+    config_dir = EVAL_CONFIG_DIR if eval_only else CONFIG_DIR
+    if not config_dir.exists():
+        return []
+
+    stems = sorted(p.stem for p in config_dir.glob("*.yml"))
     if filter_text:
         stems = [s for s in stems if filter_text in s]
     return stems
 
 
-def run_one(stem: str, dry_run: bool) -> bool:
+def run_one(stem: str, dry_run: bool, eval_only: bool) -> bool:
     """Run a single experiment. Returns True on success."""
-    cmd = [get_python(), "start_experiments.py", "--config", stem]
-    print(f"\n{'[DRY-RUN] ' if dry_run else ''}Running: {stem}")
-    print(f"  cmd : {' '.join(cmd)}")
-    print(f"  cwd : {ELLIOT_DIR}")
+    config_dir_name = "config_files_eval" if eval_only else "config_files"
+    cmd = [get_python(), "start_experiments.py",
+           "--config", stem,
+           "--config-dir", config_dir_name]
+
+    label = "[EVAL-ONLY]" if eval_only else "[TRAIN]"
+    print(f"\n{'[DRY-RUN] ' if dry_run else ''}{label} {stem}")
+    print(f"  config : {config_dir_name}/{stem}.yml")
+    print(f"  cmd    : {' '.join(cmd)}")
+    print(f"  cwd    : {ELLIOT_DIR}")
 
     if dry_run:
         return True
@@ -79,21 +93,37 @@ def main() -> None:
         "--dry-run", action="store_true",
         help="Print commands without running",
     )
+    parser.add_argument(
+        "--eval-only", action="store_true",
+        help="Run eval-only configs from config_files_eval/ (RecommendationFolder). "
+             "Generate them first with: python scripts/generate_elliot_configs.py --eval-only",
+    )
     args = parser.parse_args()
 
-    stems = collect_configs(filter_text=args.filter, specific=args.config)
-
-    if not stems:
-        print("No configs found. Use --filter or --config to specify experiments.")
+    if args.eval_only and not EVAL_CONFIG_DIR.exists():
+        print(f"[ERROR] Eval config directory not found: {EVAL_CONFIG_DIR}")
+        print("        Run first: python scripts/generate_elliot_configs.py --eval-only")
         sys.exit(1)
 
-    print(f"Experiments to run ({len(stems)}):")
+    stems = collect_configs(filter_text=args.filter, specific=args.config, eval_only=args.eval_only)
+
+    if not stems:
+        mode = "eval-only" if args.eval_only else "train"
+        print(f"No {mode} configs found.")
+        if args.eval_only:
+            print("Generate them first: python scripts/generate_elliot_configs.py --eval-only")
+        else:
+            print("Use --filter or --config to specify experiments.")
+        sys.exit(1)
+
+    mode_label = "EVAL-ONLY" if args.eval_only else "TRAIN"
+    print(f"Mode: {mode_label} | Experiments to run ({len(stems)}):")
     for s in stems:
         print(f"  {s}")
 
     failed = []
     for stem in stems:
-        ok = run_one(stem, dry_run=args.dry_run)
+        ok = run_one(stem, dry_run=args.dry_run, eval_only=args.eval_only)
         if not ok:
             failed.append(stem)
 

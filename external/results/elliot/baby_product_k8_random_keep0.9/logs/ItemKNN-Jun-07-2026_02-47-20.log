@@ -1,0 +1,14 @@
+2026-06-07 02:47:20.757732: I Loading parameters
+2026-06-07 02:47:20.757732: I Parameter neighbors set to 40
+2026-06-07 02:47:20.757732: I Parameter similarity set to cosine
+2026-06-07 02:47:20.758730: I Parameter implementation set to standard
+2026-06-07 02:47:20.758730: I Parameter implicit set to False
+2026-06-07 02:47:20.758730: I Parameter shrink set to 0
+2026-06-07 02:47:20.758730: I Parameter normalize set to True
+2026-06-07 02:47:20.758730: I Parameter asymmetric_alpha set to False
+2026-06-07 02:47:20.759729: I Parameter tversky_alpha set to False
+2026-06-07 02:47:20.759729: I Parameter tversky_beta set to False
+2026-06-07 02:47:20.759729: I Parameter row_weights set to None
+2026-06-07 03:02:59.901267: I Finished
+2026-06-07 03:02:59.901267: I Writing recommendations at: D:\recsys-pipeline\results\elliot\baby_product_k8_random_keep0.9\recs
+2026-06-07 03:03:03.030398: I ******************************************

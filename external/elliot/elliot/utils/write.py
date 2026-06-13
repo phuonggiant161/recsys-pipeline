@@ -37,7 +37,8 @@ def store_recommendation(recommendations, path=""):
     Store recommendation list (top-k)
     :return:
     """
-
+    import os
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w') as out:
         for u, recs in recommendations.items():
             for i, value in recs:

@@ -1,44 +1,56 @@
 import pandas as pd
 
+
 def make_k_core(
     df: pd.DataFrame,
     user_col: str = "customer_id",
     item_col: str = "article_id",
-    k: int = 5,
-    verbose: bool = True
+    k_user: int = 5,
+    k_item: int = 5,
+    verbose: bool = True,
 ) -> pd.DataFrame:
-   
+    """Iteratively remove users with < k_user interactions and items with < k_item interactions."""
     core_df = df.copy()
     n_iter = 0
 
+    rows_before = len(core_df)
+    users_before = core_df[user_col].nunique()
+    items_before = core_df[item_col].nunique()
+
     while True:
         n_iter += 1
-        prev_rows = len(core_df)
-        prev_users = core_df[user_col].nunique()
-        prev_items = core_df[item_col].nunique()
+        prev_len = len(core_df)
 
-        # Count interactions per user
         user_counts = core_df[user_col].value_counts()
-        valid_users = user_counts[user_counts >= k].index
+        valid_users = user_counts[user_counts >= k_user].index
         core_df = core_df[core_df[user_col].isin(valid_users)]
 
-        # Count interactions per item
         item_counts = core_df[item_col].value_counts()
-        valid_items = item_counts[item_counts >= k].index
+        valid_items = item_counts[item_counts >= k_item].index
         core_df = core_df[core_df[item_col].isin(valid_items)]
-
-        curr_rows = len(core_df)
-        curr_users = core_df[user_col].nunique()
-        curr_items = core_df[item_col].nunique()
 
         if verbose:
             print(
-                f"Iter {n_iter}: "
-                f"rows={curr_rows:,}, users={curr_users:,}, items={curr_items:,}"
+                f"  Iter {n_iter}: "
+                f"rows={len(core_df):,}, "
+                f"users={core_df[user_col].nunique():,}, "
+                f"items={core_df[item_col].nunique():,}"
             )
 
-        # Stop when no more rows are removed
-        if curr_rows == prev_rows and curr_users == prev_users and curr_items == prev_items:
+        if len(core_df) == prev_len:
             break
+
+    rows_after = len(core_df)
+    users_after = core_df[user_col].nunique()
+    items_after = core_df[item_col].nunique()
+
+    print(
+        f"\n  k-core summary  (k_user={k_user}, k_item={k_item}, iters={n_iter})\n"
+        f"  {'':10s}  {'rows':>12s}  {'users':>10s}  {'items':>10s}\n"
+        f"  {'before':10s}  {rows_before:>12,}  {users_before:>10,}  {items_before:>10,}\n"
+        f"  {'after':10s}  {rows_after:>12,}  {users_after:>10,}  {items_after:>10,}\n"
+        f"  {'removed':10s}  {rows_before - rows_after:>12,}  "
+        f"{users_before - users_after:>10,}  {items_before - items_after:>10,}"
+    )
 
     return core_df.reset_index(drop=True)
