@@ -1,0 +1,14 @@
+2026-06-21 00:16:14.881940: I Loading parameters
+2026-06-21 00:16:14.881940: I Parameter neighbors set to 40
+2026-06-21 00:16:14.882943: I Parameter similarity set to cosine
+2026-06-21 00:16:14.882943: I Parameter implementation set to standard
+2026-06-21 00:16:14.882943: I Parameter implicit set to False
+2026-06-21 00:16:14.882943: I Parameter shrink set to 0
+2026-06-21 00:16:14.883940: I Parameter normalize set to True
+2026-06-21 00:16:14.883940: I Parameter asymmetric_alpha set to False
+2026-06-21 00:16:14.883940: I Parameter tversky_alpha set to False
+2026-06-21 00:16:14.883940: I Parameter tversky_beta set to False
+2026-06-21 00:16:14.883940: I Parameter row_weights set to None
+2026-06-21 00:30:21.148237: I Finished
+2026-06-21 00:30:21.148237: I Writing recommendations at: D:\recsys-pipeline\results\elliot\amazon_head_keep0.1\recs
+2026-06-21 00:30:22.837610: I ******************************************

@@ -1,0 +1,14 @@
+2026-06-18 02:31:24.303254: I Loading parameters
+2026-06-18 02:31:24.304235: I Parameter neighbors set to 40
+2026-06-18 02:31:24.304235: I Parameter similarity set to cosine
+2026-06-18 02:31:24.305235: I Parameter implementation set to standard
+2026-06-18 02:31:24.305235: I Parameter implicit set to False
+2026-06-18 02:31:24.306234: I Parameter shrink set to 0
+2026-06-18 02:31:24.306234: I Parameter normalize set to True
+2026-06-18 02:31:24.307236: I Parameter asymmetric_alpha set to False
+2026-06-18 02:31:24.307236: I Parameter tversky_alpha set to False
+2026-06-18 02:31:24.307236: I Parameter tversky_beta set to False
+2026-06-18 02:31:24.307236: I Parameter row_weights set to None
+2026-06-18 02:42:30.901989: I Finished
+2026-06-18 02:42:30.902987: I Writing recommendations at: D:\recsys-pipeline\results\elliot\hm_dedup_base_split\recs
+2026-06-18 02:42:33.614386: I ******************************************

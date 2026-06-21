@@ -1,0 +1,9 @@
+2026-06-20 01:26:54.190323: I Loading parameters
+2026-06-20 01:26:54.191321: I Parameter similarity set to cosine
+2026-06-20 01:26:54.192318: I Parameter user_profile set to tfidf
+2026-06-20 01:26:54.192318: I Parameter item_profile set to tfidf
+2026-06-20 01:26:54.192318: I Parameter loader set to ItemAttributes
+2026-06-20 01:27:04.994655: I The similarity computation has taken: 3.0001182556152344
+2026-06-20 01:29:30.115045: I Finished
+2026-06-20 01:29:30.116046: I Writing recommendations at: D:\recsys-pipeline\results\elliot\hm_random_keep0.1\recs
+2026-06-20 01:29:31.577231: I ******************************************

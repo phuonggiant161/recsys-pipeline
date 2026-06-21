@@ -6,34 +6,39 @@ from src.config import get_dataset_config
 from src.io_utils import load_dataframe
 from src.kcore import make_k_core
 from src.preprocessing import deduplicate_user_item
-from src.splitting import userwise_temporal_split
+from src.splitting import userwise_temporal_split, split_train_valid_from_train_pool
 from src.thinning import (
     generate_random_thinning_levels,
     generate_head_item_cut_levels,
     generate_tail_item_cut_levels
 )
 from src.metrics import build_reference_stats, compute_sparsity_metrics
-from src.dataset_folder import save_dataset_folder, save_train_test_folder
+from src.dataset_folder import (
+    save_dataset_folder,
+    save_train_valid_test_folder,
+)
 
 # ── Default constants (edit here, or override via CLI args) ──────────────────
-DATASET_NAME   = "baby_product"   # "hm"
-K_USER         = 5              # min interactions per user
-K_ITEM         = 15             # min interactions per item
-TEST_SIZE      = 0.2
-KEEP_FRACS     = [0.9, 0.75, 0.6, 0.45, 0.3]
-HEAD_KEEP_FRACS = [0.5]                         # head-item thinning: fixed at 0.5
-TAIL_KEEP_FRACS = [0.5] 
+DATASET_NAME   = "amazon"   # "hm"
+K_USER         = 15              # min interactions per user
+K_ITEM         = 12         # min interactions per item
+TEST_SIZE       = 0.1                           # pool → test
+VALID_SIZE      = 0.1  
+KEEP_FRACS     = [0.9, 0.7, 0.5, 0.3, 0.1]
+HEAD_KEEP_FRACS = [0.5,0.1]                         # head-item thinning: fixed at 0.5
+TAIL_KEEP_FRACS = [0.5,0.1] 
 SEED           = 42
 DEDUP_USER_ITEM = True            # True → keep last interaction per user-item pair
 
-# ── H&M preset (uncomment to switch) ────────────────────────────────────────
-# DATASET_NAME   = "hm"
-# K_USER         = 15
-# K_ITEM         = 30
-# TEST_SIZE      = 0.2
-# KEEP_FRACS      = [0.9, 0.7, 0.5, 0.3, 0.1]   # random thinning levels
-# HEAD_KEEP_FRACS = [0.5]                         # head-item thinning: fixed at 0.5
-# TAIL_KEEP_FRACS = [0.5]                         # tail-item thinning: fixed at 0.5
+# ── H&M preset ────────────────────────────────────────
+# DATASET_NAME    = "hm"
+# K_USER          = 35
+# K_ITEM          = 25
+# TEST_SIZE       = 0.1                           # pool → test
+# VALID_SIZE      = 0.1                           # train_pool → valid
+# KEEP_FRACS      = [0.9, 0.7, 0.5, 0.1, 0.05]   # random thinning levels
+# HEAD_KEEP_FRACS = [0.5,0.1]                         # head-item thinning: fixed at 0.5
+# TAIL_KEEP_FRACS = [0.5,0.1]                         # tail-item thinning: fixed at 0.5
 # SEED            = 42
 # DEDUP_USER_ITEM = True
 
@@ -49,6 +54,35 @@ def parse_args():
     p.add_argument("--k-item", type=int, default=None, dest="k_item",
                    help=f"Min interactions per item for k-core (default: {K_ITEM})")
     return p.parse_args()
+
+
+def _make_thinning_metadata(
+    dataset_name, method, base_output, preprocessing_method,
+    user_col, item_col, timestamp_col, k_user, k_item,
+    keep_frac, reference_stats, train_metrics, test_base,
+):
+    return {
+        "dataset_name": dataset_name,
+        "method": method,
+        "parent_dataset": str(base_output),
+        "preprocessing_method": preprocessing_method,
+        "user_col": user_col,
+        "item_col": item_col,
+        "timestamp_col": timestamp_col,
+        "k_user": k_user,
+        "k_item": k_item,
+        "test_size": TEST_SIZE,
+        "valid_size_from_train_pool": VALID_SIZE,
+        "split_method": "userwise_temporal_split",
+        "dedup_user_item": DEDUP_USER_ITEM,
+        "dedup_keep": "last" if DEDUP_USER_ITEM else None,
+        "keep_frac": keep_frac,
+        "reference_stats": reference_stats,
+        "train_metrics": train_metrics,
+        "test_policy": "fixed_test_from_base_split",
+        "valid_policy": "temporal_valid_split_from_each_train_pool",
+        "test_rows": int(len(test_base)),
+    }
 
 
 def main():
@@ -138,17 +172,29 @@ def main():
         metadata=dense_metadata,
     )
 
-    print("Step 4: User-wise temporal train/test split")
-    train_base, test_base = userwise_temporal_split(
+    # ── Step 4: dense_df → train_pool_base / test_base ──────────────────────
+    print(f"Step 4: User-wise temporal split  →  train_pool / test  (test_size={TEST_SIZE})")
+    train_pool_base, test_base = userwise_temporal_split(
         df=dense_df,
         user_col=user_col,
         timestamp_col=timestamp_col,
         test_size=TEST_SIZE,
         min_train_interactions=1,
-        min_test_interactions=1
+        min_test_interactions=1,
     )
-    print(f"  Train base shape: {train_base.shape}")
-    print(f"  Test base shape:  {test_base.shape}")
+    print(f"  train_pool_base shape: {train_pool_base.shape}")
+    print(f"  test_base shape:       {test_base.shape}")
+
+    # ── Step 4b: train_pool_base → train_base / valid_base ──────────────────
+    print(f"Step 4b: Split train_pool_base  →  train / valid  (valid_size={VALID_SIZE})")
+    train_base, valid_base = split_train_valid_from_train_pool(
+        train_pool=train_pool_base,
+        user_col=user_col,
+        timestamp_col=timestamp_col,
+        valid_size=VALID_SIZE,
+    )
+    print(f"  train_base shape: {train_base.shape}")
+    print(f"  valid_base shape: {valid_base.shape}")
 
     train_base_metrics = compute_sparsity_metrics(
         train_base, user_col=user_col, item_col=item_col, reference_stats=reference_stats
@@ -166,7 +212,10 @@ def main():
         "k_user": k_user,
         "k_item": k_item,
         "test_size": TEST_SIZE,
+        "valid_size_from_train_pool": VALID_SIZE,
         "split_method": "userwise_temporal_split",
+        "valid_policy": "temporal_valid_split_from_each_train_pool",
+        "test_policy": "fixed_test_from_base_split",
         "dedup_user_item": DEDUP_USER_ITEM,
         "dedup_keep": "last" if DEDUP_USER_ITEM else None,
         "reference_stats": reference_stats,
@@ -174,10 +223,13 @@ def main():
         "test_rows": int(len(test_base)),
         "test_users": int(test_base[user_col].nunique()),
         "test_items": int(test_base[item_col].nunique()),
+        "valid_rows": int(len(valid_base)),
+        "valid_users": int(valid_base[user_col].nunique()),
     }
 
-    save_train_test_folder(
+    save_train_valid_test_folder(
         train_df=train_base,
+        valid_df=valid_base,
         test_df=test_base,
         output_dir=base_output,
         user_col=user_col,
@@ -185,9 +237,10 @@ def main():
         metadata=base_metadata,
     )
 
+    # ── Step 5: Random thinning on train_pool_base → thin_train_pool → train/valid ──
     print("Step 5: Random thinning")
-    thinning_outputs = generate_random_thinning_levels(
-        df=train_base,
+    random_pool_outputs = generate_random_thinning_levels(
+        df=train_pool_base,
         keep_fracs=KEEP_FRACS,
         seed=SEED,
         user_col=user_col,
@@ -197,42 +250,36 @@ def main():
 
     random_report_rows = [{"dataset": "base_train", "keep_frac": 1.0, **train_base_metrics}]
 
-    for level_name, thin_train_df in thinning_outputs.items():
+    for level_name, thin_train_pool in random_pool_outputs.items():
+        thin_train, thin_valid = split_train_valid_from_train_pool(
+            train_pool=thin_train_pool,
+            user_col=user_col,
+            timestamp_col=timestamp_col,
+            valid_size=VALID_SIZE,
+        )
         thin_metrics = compute_sparsity_metrics(
-            thin_train_df, user_col=user_col, item_col=item_col, reference_stats=reference_stats
+            thin_train, user_col=user_col, item_col=item_col, reference_stats=reference_stats
         )
         thin_output = output_root / f"{dataset_name}_random_{level_name}"
-        keep_frac = len(thin_train_df) / len(train_base)
-        thin_metadata = {
-            "dataset_name": dataset_name,
-            "method": "random_thinning_train_only",
-            "parent_dataset": str(base_output),
-            "preprocessing_method": preprocessing_method,
-            "user_col": user_col,
-            "item_col": item_col,
-            "timestamp_col": timestamp_col,
-            "k_user": k_user,
-            "k_item": k_item,
-            "test_size": TEST_SIZE,
-            "split_method": "userwise_temporal_split",
-            "dedup_user_item": DEDUP_USER_ITEM,
-            "dedup_keep": "last" if DEDUP_USER_ITEM else None,
-            "keep_frac": keep_frac,
-            "reference_stats": reference_stats,
-            "train_metrics": thin_metrics,
-            "test_policy": "fixed_test_from_base_split",
-            "test_rows": int(len(test_base)),
-        }
-        save_train_test_folder(
-            train_df=thin_train_df, test_df=test_base,
+        keep_frac = len(thin_train_pool) / len(train_pool_base)
+        thin_metadata = _make_thinning_metadata(
+            dataset_name=dataset_name, method="random_thinning_train_only",
+            base_output=base_output, preprocessing_method=preprocessing_method,
+            user_col=user_col, item_col=item_col, timestamp_col=timestamp_col,
+            k_user=k_user, k_item=k_item, keep_frac=keep_frac,
+            reference_stats=reference_stats, train_metrics=thin_metrics, test_base=test_base,
+        )
+        save_train_valid_test_folder(
+            train_df=thin_train, valid_df=thin_valid, test_df=test_base,
             output_dir=thin_output, user_col=user_col, item_col=item_col,
             metadata=thin_metadata,
         )
         random_report_rows.append({"dataset": level_name, "keep_frac": keep_frac, **thin_metrics})
 
+    # ── Step 6: Head-item thinning on train_pool_base ───────────────────────
     print("Step 6: Head-item thinning")
-    head_outputs = generate_head_item_cut_levels(
-        df=train_base,
+    head_pool_outputs = generate_head_item_cut_levels(
+        df=train_pool_base,
         item_col=item_col,
         keep_fracs=HEAD_KEEP_FRACS,
         seed=SEED,
@@ -243,42 +290,36 @@ def main():
 
     head_report_rows = [{"dataset": "base_train", "keep_frac": 1.0, **train_base_metrics}]
 
-    for level_name, thin_train_df in head_outputs.items():
+    for level_name, thin_train_pool in head_pool_outputs.items():
+        thin_train, thin_valid = split_train_valid_from_train_pool(
+            train_pool=thin_train_pool,
+            user_col=user_col,
+            timestamp_col=timestamp_col,
+            valid_size=VALID_SIZE,
+        )
         thin_metrics = compute_sparsity_metrics(
-            thin_train_df, user_col=user_col, item_col=item_col, reference_stats=reference_stats
+            thin_train, user_col=user_col, item_col=item_col, reference_stats=reference_stats
         )
         thin_output = output_root / f"{dataset_name}_head_{level_name}"
-        keep_frac = len(thin_train_df) / len(train_base)
-        thin_metadata = {
-            "dataset_name": dataset_name,
-            "method": "head_item_cut_train_only",
-            "parent_dataset": str(base_output),
-            "preprocessing_method": preprocessing_method,
-            "user_col": user_col,
-            "item_col": item_col,
-            "timestamp_col": timestamp_col,
-            "k_user": k_user,
-            "k_item": k_item,
-            "test_size": TEST_SIZE,
-            "split_method": "userwise_temporal_split",
-            "dedup_user_item": DEDUP_USER_ITEM,
-            "dedup_keep": "last" if DEDUP_USER_ITEM else None,
-            "keep_frac": keep_frac,
-            "reference_stats": reference_stats,
-            "train_metrics": thin_metrics,
-            "test_policy": "fixed_test_from_base_split",
-            "test_rows": int(len(test_base)),
-        }
-        save_train_test_folder(
-            train_df=thin_train_df, test_df=test_base,
+        keep_frac = len(thin_train_pool) / len(train_pool_base)
+        thin_metadata = _make_thinning_metadata(
+            dataset_name=dataset_name, method="head_item_cut_train_only",
+            base_output=base_output, preprocessing_method=preprocessing_method,
+            user_col=user_col, item_col=item_col, timestamp_col=timestamp_col,
+            k_user=k_user, k_item=k_item, keep_frac=keep_frac,
+            reference_stats=reference_stats, train_metrics=thin_metrics, test_base=test_base,
+        )
+        save_train_valid_test_folder(
+            train_df=thin_train, valid_df=thin_valid, test_df=test_base,
             output_dir=thin_output, user_col=user_col, item_col=item_col,
             metadata=thin_metadata,
         )
         head_report_rows.append({"dataset": level_name, "keep_frac": keep_frac, **thin_metrics})
 
+    # ── Step 7: Tail-item thinning on train_pool_base ───────────────────────
     print("Step 7: Tail-item thinning")
-    tail_outputs = generate_tail_item_cut_levels(
-        df=train_base,
+    tail_pool_outputs = generate_tail_item_cut_levels(
+        df=train_pool_base,
         item_col=item_col,
         keep_fracs=TAIL_KEEP_FRACS,
         seed=SEED,
@@ -289,34 +330,27 @@ def main():
 
     tail_report_rows = [{"dataset": "base_train", "keep_frac": 1.0, **train_base_metrics}]
 
-    for level_name, thin_train_df in tail_outputs.items():
+    for level_name, thin_train_pool in tail_pool_outputs.items():
+        thin_train, thin_valid = split_train_valid_from_train_pool(
+            train_pool=thin_train_pool,
+            user_col=user_col,
+            timestamp_col=timestamp_col,
+            valid_size=VALID_SIZE,
+        )
         thin_metrics = compute_sparsity_metrics(
-            thin_train_df, user_col=user_col, item_col=item_col, reference_stats=reference_stats
+            thin_train, user_col=user_col, item_col=item_col, reference_stats=reference_stats
         )
         thin_output = output_root / f"{dataset_name}_tail_{level_name}"
-        keep_frac = len(thin_train_df) / len(train_base)
-        thin_metadata = {
-            "dataset_name": dataset_name,
-            "method": "tail_item_cut_train_only",
-            "parent_dataset": str(base_output),
-            "preprocessing_method": preprocessing_method,
-            "user_col": user_col,
-            "item_col": item_col,
-            "timestamp_col": timestamp_col,
-            "k_user": k_user,
-            "k_item": k_item,
-            "test_size": TEST_SIZE,
-            "split_method": "userwise_temporal_split",
-            "dedup_user_item": DEDUP_USER_ITEM,
-            "dedup_keep": "last" if DEDUP_USER_ITEM else None,
-            "keep_frac": keep_frac,
-            "reference_stats": reference_stats,
-            "train_metrics": thin_metrics,
-            "test_policy": "fixed_test_from_base_split",
-            "test_rows": int(len(test_base)),
-        }
-        save_train_test_folder(
-            train_df=thin_train_df, test_df=test_base,
+        keep_frac = len(thin_train_pool) / len(train_pool_base)
+        thin_metadata = _make_thinning_metadata(
+            dataset_name=dataset_name, method="tail_item_cut_train_only",
+            base_output=base_output, preprocessing_method=preprocessing_method,
+            user_col=user_col, item_col=item_col, timestamp_col=timestamp_col,
+            k_user=k_user, k_item=k_item, keep_frac=keep_frac,
+            reference_stats=reference_stats, train_metrics=thin_metrics, test_base=test_base,
+        )
+        save_train_valid_test_folder(
+            train_df=thin_train, valid_df=thin_valid, test_df=test_base,
             output_dir=thin_output, user_col=user_col, item_col=item_col,
             metadata=thin_metadata,
         )

@@ -1,0 +1,11 @@
+2026-06-14 17:25:11.975731: I Start experiment
+2026-06-14 17:25:12.702609: I D:\recsys-pipeline\data\processed\baby_product_random_keep0.75\train.tsv - Loaded
+2026-06-14 17:25:13.961542: I Test Fold 0
+2026-06-15 23:39:11.997606: I Statistics	Users:	116013	Items:	12538	Transactions:	516794	Sparsity:	0.9996447103633087
+2026-06-16 00:08:23.431202: I Training begun for ItemKNN\n
+2026-06-16 00:08:23.431202: I Hyperparameters:
+2026-06-16 00:08:23.432203: I meta set to namespace(save_recs=True)
+2026-06-16 00:08:23.432203: I neighbors set to 40
+2026-06-16 00:08:23.433206: I similarity set to cosine
+2026-06-16 00:08:23.434207: I Exploration: Test Fold exploration number 1
+2026-06-16 00:08:23.435202: I Exploration: Train-Validation Fold exploration number 1

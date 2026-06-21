@@ -1,4 +1,4 @@
-﻿experiment:
+experiment:
   dataset: hm_dedup_base_split
 
   data_config:

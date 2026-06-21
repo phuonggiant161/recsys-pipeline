@@ -1,4 +1,4 @@
-﻿experiment:
+experiment:
   dataset: hm_random_keep0.5
 
   data_config:

@@ -1,0 +1,14 @@
+2026-06-19 02:37:34.880124: I Loading parameters
+2026-06-19 02:37:34.881122: I Parameter neighbors set to 40
+2026-06-19 02:37:34.881122: I Parameter similarity set to cosine
+2026-06-19 02:37:34.882122: I Parameter implementation set to standard
+2026-06-19 02:37:34.882122: I Parameter implicit set to False
+2026-06-19 02:37:34.882122: I Parameter shrink set to 0
+2026-06-19 02:37:34.882122: I Parameter normalize set to True
+2026-06-19 02:37:34.883122: I Parameter asymmetric_alpha set to False
+2026-06-19 02:37:34.883122: I Parameter tversky_alpha set to False
+2026-06-19 02:37:34.883122: I Parameter tversky_beta set to False
+2026-06-19 02:37:34.883122: I Parameter row_weights set to None
+2026-06-19 02:38:29.952618: I Finished
+2026-06-19 02:38:29.953533: I Writing recommendations at: D:\recsys-pipeline\results\elliot\hm_tail_keep0.1\recs
+2026-06-19 02:38:31.406360: I ******************************************

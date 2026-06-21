@@ -38,5 +38,10 @@ class ItemAttributes(AbstractLoader):
             for line in file:
                 line = line.split(separator)
                 int_list = [int(i) for i in line[1:]]
-                map_[int(line[0])] = list(set(int_list))
+                key_str = line[0].strip()
+                try:
+                    key = int(key_str)
+                except ValueError:
+                    key = key_str
+                map_[key] = list(set(int_list))
         return map_

@@ -17,15 +17,22 @@ recsys-pipeline/
 ├── src/
 │   ├── config.py                  # Khai báo dataset (input path, cột)
 │   ├── thinning.py                # 3 chiến lược thinning: random, head-item, tail-item
-│   ├── dataset_folder.py          # Lưu train/test + tự export .tsv cho Elliot
+│   ├── dataset_folder.py          # Lưu train/valid/test + tự export .tsv cho Elliot
 │   └── ...
 ├── scripts/
-│   ├── generate_elliot_configs.py # Tự sinh Elliot config từ data/processed/
-│   └── run_elliot.py              # Chạy Elliot experiments từ repo root
+│   ├── generate_elliot_configs.py   # Tự sinh Elliot config từ data/processed/
+│   ├── run_elliot.py                # Chạy Elliot experiments từ repo root
+│   └── build_vsm_item_attributes.py # Sinh item_attributes.tsv cho model VSM
 ├── external/elliot/               # Elliot framework
 ├── data/
 │   ├── raw/                       # Dữ liệu thô (không commit)
+│   │   ├── hm.csv
+│   │   ├── metadata_hm.csv        # Article attributes (article_id, prod_name, detail_desc, ...)
+│   │   └── amazon.parquet
 │   ├── processed/                 # Output của main.py (không commit)
+│   │   └── {folder}/
+│   │       ├── train.tsv / valid.tsv / test.tsv   # Elliot format
+│   │       └── item_attributes.tsv                # Cho VSM (sinh bởi build_vsm_item_attributes.py)
 │   └── reports/                   # Sparsity summary CSV (commit)
 └── results/elliot/
     └── {tên_dataset}/performance/ # Kết quả metrics của Elliot (commit)
@@ -42,7 +49,7 @@ https://drive.google.com/drive/folders/15D99fn2hSeKwfRGJWadF9hDNB4DaRqrb
 Sau khi tải về, đặt vào:
 ```
 data/raw/hm.csv
-data/raw/baby_product.parquet
+data/raw/amazon.parquet
 ```
 
 ---
@@ -80,10 +87,10 @@ python scripts/run_elliot.py                 # Bước 3: chạy Elliot
 
 Cách 1 — sửa constants trong file:
 ```python
-DATASET_NAME = "hm"     # hoặc "baby_product"
+DATASET_NAME = "hm"     # hoặc "amazon"
 K_USER       = 20       # k-core: min interactions per user
 K_ITEM       = 20       # k-core: min interactions per item
-KEEP_FRACS   = [0.9, 0.7, 0.5, 0.3, 0.1]
+KEEP_FRACS   = ;
 ```
 
 Cách 2 — truyền qua CLI (override constants):
@@ -93,45 +100,50 @@ python main.py --dataset hm --k 20
 
 # k_user và k_item khác nhau
 python main.py --dataset hm --k-user 10 --k-item 30
-python main.py --dataset baby_product --k-user 3 --k-item 10
+python main.py --dataset amazon --k-user 3 --k-item 10
 ```
 
 **Bước 2** — các flag hữu ích:
 ```bash
-python scripts/generate_elliot_configs.py --filter hm_k20   # chỉ gen subset
-python scripts/generate_elliot_configs.py --overwrite        # gen lại toàn bộ
+python scripts/generate_elliot_configs.py --model ItemKNN            # chỉ gen ItemKNN
+python scripts/generate_elliot_configs.py --model VSM                # chỉ gen VSM
+python scripts/generate_elliot_configs.py --model ItemKNN VSM        # gen cả hai
+python scripts/generate_elliot_configs.py --model ItemKNN --filter hm_random  # subset
+python scripts/generate_elliot_configs.py --model ItemKNN --overwrite          # gen lại
 ```
 
 **Bước 3** — các flag hữu ích:
 ```bash
-python scripts/run_elliot.py --filter hm_k20_random          # chỉ chạy subset
-python scripts/run_elliot.py --config hm_k20_dedup_base_split_itemknn  # 1 experiment
-python scripts/run_elliot.py --filter hm_k20 --dry-run       # xem lệnh, không chạy thật
+python scripts/run_elliot.py --filter hm_random              # chỉ chạy subset
+python scripts/run_elliot.py --config hm_random_keep0.05_itemknn     # 1 experiment
+python scripts/run_elliot.py --config hm_random_keep0.05_vsm         # 1 experiment VSM
+python scripts/run_elliot.py --filter hm_random --dry-run            # xem lệnh, không chạy
 ```
 
 Kết quả ghi vào `results/elliot/{tên_dataset}/performance/`.
 
 ---
 
-## Eval-only mode (chạy lại evaluation không train lại)
+## VSM — Sinh item attributes
 
-Dùng khi đã có rec files từ lần train trước và muốn tính lại metrics (ví dụ sau khi thêm metric mới).
+Cần chạy **một lần** sau `main.py`, trước khi gen config VSM.
+Script đọc các text columns từ metadata, vectorize bằng CountVectorizer, sinh file integer feature dùng chung cho toàn bộ experiments.
 
 ```bash
-# Bước 1: sinh eval-only configs (chỉ gen cho dataset đã có rec files)
-python scripts/generate_elliot_configs.py --eval-only
+# H&M (item key: article_id, text: prod_name + detail_desc):
+python scripts/build_vsm_item_attributes.py \
+    --metadata-path data/raw/metadata_hm.csv \
+    --global-output data/processed/hm_item_attributes.tsv \
+    --dataset hm
 
-# Bước 2: chạy evaluation
-python scripts/run_elliot.py --eval-only
-
-# Hoặc chỉ một subset
-python scripts/generate_elliot_configs.py --eval-only --filter hm_k20
-python scripts/run_elliot.py --eval-only --filter hm_k20
+# Amazon (item key: parent_asin, text: title + description):
+python scripts/build_vsm_item_attributes.py \
+    --metadata-path data/raw/metadata_amazon.csv \
+    --global-output data/processed/amazon_item_attributes.tsv \
+    --dataset amazon
 ```
 
-Eval-only configs được lưu tại `external/elliot/config_files_eval/` (tách biệt với train configs).
-Dùng `RecommendationFolder` để đọc rec files có sẵn trong `results/elliot/{dataset}/recs/` —
-**không train lại model**, không ghi đè rec files cũ.
+Output: một file dùng chung cho tất cả experiments của dataset đó (format `item_id<TAB>feat_id_1<TAB>feat_id_2...`).
 
 ---
 
@@ -154,4 +166,4 @@ Mỗi experiment đánh giá các metrics sau:
 
 Metric `_u1` trả về `NaN` nếu không có user nào trong nhóm (ví dụ: base split với k=20 kcore, tất cả user đều có nhiều hơn 1 train interaction).
 
-Cutoffs mặc định: `[10, 20]`.
+Cutoffs mặc định: `[10, 20, 50]`.

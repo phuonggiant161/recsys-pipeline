@@ -7,8 +7,8 @@ DATASET_CONFIG = {
         "timestamp_col": "t_dat",
         "default_k": 10,
     },
-    "baby_product": {
-        "input_path": "data/raw/baby_product.parquet",
+    "amazon": {
+        "input_path": "data/raw/amazon.parquet",
         "user_col": "user_id",
         "item_col": "parent_asin",
         "timestamp_col": "timestamp",

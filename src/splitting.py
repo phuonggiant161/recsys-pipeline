@@ -87,3 +87,29 @@ def userwise_temporal_split(
     print(f"Users not split due to insufficient interactions: {skipped_users}")
 
     return train_df.reset_index(drop=True), test_df.reset_index(drop=True)
+
+
+def split_train_valid_from_train_pool(
+    train_pool: pd.DataFrame,
+    user_col: str,
+    timestamp_col: str,
+    valid_size: float = 0.1,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Chia train_pool thành train/valid theo user-wise temporal split.
+
+    Với mỗi user:
+    - Sort interactions theo timestamp tăng dần.
+    - Phần cũ vào train, phần mới (valid_size %) vào valid.
+    - Nếu user chỉ có 1 interaction trong train_pool thì giữ toàn bộ trong train,
+      không đưa sang valid.
+    """
+    train_df, valid_df = userwise_temporal_split(
+        df=train_pool,
+        user_col=user_col,
+        timestamp_col=timestamp_col,
+        test_size=valid_size,
+        min_train_interactions=1,
+        min_test_interactions=1,
+    )
+    return train_df, valid_df
