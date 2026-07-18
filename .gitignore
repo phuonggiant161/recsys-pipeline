@@ -1,9 +1,29 @@
 venv/
 __pycache__/
-*.pyc
+*.py[cod]
+dev/
+
+# Model checkpoints and weights
+saved/
+*.pth
+*.pt
+*.ckpt
+*.checkpoint
+
+# Training logs
+log/
+logs/
+log_tensorboard/
+
+# RecBole outputs
+results/recbole/
+
+# Elliot outputs written to external/results/ (generated, not source)
+external/results/
 
 data/raw/*
 data/processed/*
+data/recbole/
 results/elliot/*/recs/
 results/elliot/*/logs/
 

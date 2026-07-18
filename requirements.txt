@@ -7,3 +7,6 @@ scipy
 PyYAML
 scikit-learn
 Pillow
+matplotlib
+openpyxl
+# RecBole: install from source — see README (external/recbole)

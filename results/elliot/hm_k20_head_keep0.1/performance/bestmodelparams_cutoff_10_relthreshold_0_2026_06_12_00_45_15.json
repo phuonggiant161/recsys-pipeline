@@ -1,7 +1,0 @@
-[
-    {
-        "default_validation_metric": "Precision",
-        "default_validation_cutoff": 10,
-        "rel_threshold": 0
-    }
-]

@@ -238,7 +238,7 @@ def build_item_attributes(
     if not tsv_ids:
         raise FileNotFoundError(
             f"Neither train.tsv nor test.tsv found in {dataset_dir}. "
-            f"Run main.py first."
+            f"Run preprocess.py first."
         )
     item_ids = sorted(tsv_ids)
     n_tsv_items = len(tsv_ids)

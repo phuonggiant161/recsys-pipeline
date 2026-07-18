@@ -1,0 +1,69 @@
+model: ItemKNN
+
+# --- Data ---
+benchmark_filename:
+  - train
+  - valid
+  - test
+
+USER_ID_FIELD: user_id
+ITEM_ID_FIELD: item_id
+TIME_FIELD: timestamp
+
+field_separator: "\t"
+
+load_col:
+  inter:
+    - user_id
+    - item_id
+    - timestamp
+
+user_inter_num_interval: "[0,inf)"
+item_inter_num_interval: "[0,inf)"
+
+# --- Model ---
+k: 40
+shrink: 0.0
+knn_method: item
+
+# --- Training ---
+train_batch_size: 2048
+eval_batch_size: 4096
+
+# --- Evaluation ---
+eval_args:
+  group_by: user
+  mode:
+    valid: full
+    test: full
+
+metrics:
+  - Precision
+  - Recall
+  - NDCG
+  - MAP
+  - MRR
+  - U1Precision
+  - U1Recall
+  - U1NDCG
+  - U1MAP
+  - U1MRR
+
+topk:
+  - 10
+  - 20
+  - 50
+
+valid_metric: NDCG@10
+valid_metric_bigger: true
+metric_decimal_place: 10
+
+# --- Misc ---
+seed: 2020
+reproducibility: true
+show_progress: true
+
+use_gpu: false
+
+save_dataset: false
+save_dataloaders: false

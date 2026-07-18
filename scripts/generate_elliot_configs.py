@@ -152,6 +152,7 @@ experiment:
   data_config:
     strategy: fixed
     train_path: {_DATA}/{folder_name}/train.tsv
+    validation_path: {_DATA}/{folder_name}/valid.tsv
     test_path: {_DATA}/{folder_name}/test.tsv{data_extra}
 
   top_k: 50
@@ -184,7 +185,7 @@ def generate_train_configs(folders, models: list[_Model], overwrite: bool) -> No
     generated = skipped_existing = skipped_missing = skipped_preflight = 0
 
     for folder in folders:
-        missing = [f for f in ("train.tsv", "test.tsv") if not (folder / f).exists()]
+        missing = [f for f in ("train.tsv", "valid.tsv", "test.tsv") if not (folder / f).exists()]
         if missing:
             print(f"[SKIP] {folder.name} — missing {', '.join(missing)}")
             skipped_missing += 1

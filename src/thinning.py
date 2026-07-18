@@ -1,293 +1,404 @@
-from pathlib import Path
+"""
+Thinning strategies for interaction datasets.
+
+Public API
+----------
+build_protected_interactions(df, user_col, item_col, timestamp_col)
+    Returns the minimal subset of df that must stay in train to cover every
+    user and every item at least once.
+
+thin_with_protected_user_item_interactions(
+    df, user_col, item_col, timestamp_col, keep_frac, thinning_func, ...)
+    Wraps any thinning strategy so the result is guaranteed to contain the
+    same user set and item set as the input.
+
+generate_random_thinning_levels(df, keep_fracs, user_col, item_col, timestamp_col, ...)
+generate_head_item_cut_levels(df, keep_fracs, user_col, item_col, timestamp_col, ...)
+generate_tail_item_cut_levels(df, keep_fracs, user_col, item_col, timestamp_col, ...)
+    Batch helpers that return {level_name: thinned_df}.
+
+random_thin_interactions(df, keep_frac, seed)
+head_item_cut(df, item_col, keep_frac, seed, ...)
+tail_item_cut(df, item_col, keep_frac, seed, ...)
+    Pure thinning functions — no user/item protection, no assertions.
+    Suitable as thinning_func arguments.
+"""
+
+import math
 import pandas as pd
 import numpy as np
 from time import perf_counter
 
-def split_first_interaction_per_user(
+
+# ---------------------------------------------------------------------------
+# Protected interaction helpers
+# ---------------------------------------------------------------------------
+
+def build_protected_row_ids(
     df: pd.DataFrame,
     user_col: str,
-    timestamp_col: str
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+    item_col: str,
+    timestamp_col: str,
+) -> frozenset:
     """
-    Tách df thành:
-    - protected_df: 1 interaction đầu tiên của mỗi user theo timestamp
-    - remainder_df: các interaction còn lại để đem đi thinning
+    Identify the minimal set of row IDs that must be kept in train so that
+    every user and every item has at least one interaction.
+
+    df must contain a column named "__row_id" with unique integer values
+    (typically 0-indexed).  The caller is responsible for creating it.
+
+    Algorithm
+    ---------
+    Step 1 — For each user, select the row with the earliest timestamp.
+             Ties are broken by __row_id (stable across runs).
+
+    Step 2 — Determine which items are *not* already covered by step-1 rows.
+             For each such item, select the row with the earliest timestamp.
+
+    Step 3 — Return the union of both sets (no duplicates).
+
+    Returns
+    -------
+    frozenset of __row_id integer values.
     """
-    if user_col not in df.columns:
-        raise KeyError(f"user_col '{user_col}' not found in df")
+    assert "__row_id" in df.columns, "df must have a '__row_id' column"
 
-    if timestamp_col not in df.columns:
-        raise KeyError(f"timestamp_col '{timestamp_col}' not found in df")
+    # Single sort used for both steps: oldest first, row_id breaks ties
+    sorted_df = df.sort_values([timestamp_col, "__row_id"], kind="stable")
 
+    # Step 1: first interaction per user
+    user_first_ids: set = set(
+        sorted_df.groupby(user_col, sort=False)["__row_id"].first().values
+    )
+
+    # Step 2: items not covered by step-1
+    covered_items: set = set(
+        df.loc[df["__row_id"].isin(user_first_ids), item_col]
+    )
+    uncovered_df = sorted_df.loc[~sorted_df[item_col].isin(covered_items)]
+
+    item_first_ids: set = set()
+    if len(uncovered_df) > 0:
+        item_first_ids = set(
+            uncovered_df.groupby(item_col, sort=False)["__row_id"].first().values
+        )
+
+    return frozenset(user_first_ids | item_first_ids)
+
+
+def build_protected_interactions(
+    df: pd.DataFrame,
+    user_col: str,
+    item_col: str,
+    timestamp_col: str,
+) -> pd.DataFrame:
+    """
+    Return the subset of df that must stay in train to cover every user and
+    every item.  See build_protected_row_ids() for the selection algorithm.
+
+    This is a convenience wrapper that manages the temporary __row_id column.
+    """
     work = df.reset_index(drop=True).copy()
     work["__row_id"] = np.arange(len(work))
 
-    first_row_ids = (
-        work.sort_values([user_col, timestamp_col, "__row_id"])
-            .groupby(user_col, sort=False)["__row_id"]
-            .first()
-            .to_numpy()
-    )
+    protected_ids = build_protected_row_ids(work, user_col, item_col, timestamp_col)
 
-    protected_mask = np.zeros(len(work), dtype=bool)
-    protected_mask[first_row_ids] = True
-
-    protected_df = (
-        work.loc[protected_mask]
+    return (
+        work.loc[work["__row_id"].isin(protected_ids)]
             .drop(columns="__row_id")
-            .copy()
             .reset_index(drop=True)
     )
 
-    remainder_df = (
-        work.loc[~protected_mask]
-            .drop(columns="__row_id")
-            .copy()
-            .reset_index(drop=True)
-    )
 
-    return protected_df, remainder_df
+# ---------------------------------------------------------------------------
+# Thinning with user+item preservation
+# ---------------------------------------------------------------------------
 
-
-def thin_with_protected_first_interaction(
+def thin_with_protected_user_item_interactions(
     df: pd.DataFrame,
     user_col: str,
+    item_col: str,
     timestamp_col: str,
     keep_frac: float,
     thinning_func,
     seed: int = 42,
-    thinning_kwargs: dict | None = None
+    thinning_kwargs: dict | None = None,
 ) -> pd.DataFrame:
     """
-    Thin df nhưng vẫn giữ đủ user.
+    Apply thinning_func while guaranteeing the result contains every user
+    and every item from the input df.
 
-    Logic:
-    - Giữ 1 interaction đầu tiên của mỗi user.
-    - Chỉ thin phần interaction còn lại.
-    - Gộp lại để tạo train thin cuối cùng.
+    Strategy
+    --------
+    1. Compute the protected set (first per user + first per uncovered item).
+    2. Thin only the non-protected remainder, adjusting the fraction so that
+       the total kept rows equals int(round(len(df) * keep_frac)).
+    3. Concatenate protected + thinned remainder.
+    4. Assert user set and item set are fully preserved.
 
-    keep_frac vẫn được tính trên toàn bộ df ban đầu.
+    Parameters
+    ----------
+    df            : Input interaction DataFrame.
+    user_col      : Column name for user IDs.
+    item_col      : Column name for item IDs.
+    timestamp_col : Column name for timestamps.
+    keep_frac     : Target fraction of rows to keep (0 < keep_frac ≤ 1).
+    thinning_func : Callable f(df, keep_frac, seed, **kwargs) → DataFrame.
+    seed          : Random seed passed through to thinning_func.
+    thinning_kwargs: Extra keyword arguments forwarded to thinning_func.
+
+    Returns
+    -------
+    DataFrame with the same columns as df, same user set, same item set.
+
+    Raises
+    ------
+    ValueError    if keep_frac is too small to cover all protected rows.
+    AssertionError if the user/item sets are somehow not preserved.
     """
     if thinning_kwargs is None:
         thinning_kwargs = {}
 
-    protected_df, remainder_df = split_first_interaction_per_user(
-        df=df,
-        user_col=user_col,
-        timestamp_col=timestamp_col
-    )
+    work = df.reset_index(drop=True).copy()
+    work["__row_id"] = np.arange(len(work))
 
-    target_total_keep = int(round(len(df) * keep_frac))
-    n_protected = len(protected_df)
+    protected_ids = build_protected_row_ids(work, user_col, item_col, timestamp_col)
+    n_protected = len(protected_ids)
+    target_total = int(round(len(df) * keep_frac))
 
-    if target_total_keep < n_protected:
-        min_keep_frac = n_protected / len(df)
-
+    if target_total < n_protected:
         raise ValueError(
-            f"keep_frac={keep_frac} quá nhỏ để giữ đủ user. "
-            f"Cần keep_frac >= {min_keep_frac:.4f}. "
-            f"target_total_keep={target_total_keep}, "
-            f"n_users={n_protected}."
+            f"keep_frac={keep_frac:.4f} is too small to cover all users and items. "
+            f"Need ≥ {n_protected} rows "
+            f"({df[user_col].nunique()} users + uncovered items), "
+            f"but target_total={target_total}. "
+            f"Minimum keep_frac ≈ {n_protected / len(df):.4f}."
         )
 
-    target_remainder_keep = target_total_keep - n_protected
+    protected_df = (
+        work.loc[work["__row_id"].isin(protected_ids)]
+            .drop(columns="__row_id")
+            .reset_index(drop=True)
+    )
+    remainder_df = (
+        work.loc[~work["__row_id"].isin(protected_ids)]
+            .drop(columns="__row_id")
+            .reset_index(drop=True)
+    )
 
-    if target_remainder_keep == 0:
-        thinned_remainder_df = remainder_df.iloc[0:0].copy() #không lấy remainder
+    target_remainder = target_total - n_protected
 
-    elif target_remainder_keep >= len(remainder_df):
-        thinned_remainder_df = remainder_df.copy().reset_index(drop=True) #lấy toàn bộ remainder
-
+    if target_remainder == 0 or len(remainder_df) == 0:
+        thinned_remainder = remainder_df.iloc[0:0].copy()
+    elif target_remainder >= len(remainder_df):
+        thinned_remainder = remainder_df.copy()
     else:
-        adjusted_keep_frac = target_remainder_keep / len(remainder_df) #chia lại tỉ lệ cần cut
-
-        thinned_remainder_df = thinning_func(
+        adj_frac = target_remainder / len(remainder_df)
+        thinned_remainder = thinning_func(
             df=remainder_df,
-            keep_frac=adjusted_keep_frac,
+            keep_frac=adj_frac,
             seed=seed,
-            **thinning_kwargs
+            **thinning_kwargs,
         )
 
-    thin_df = (
-        pd.concat([protected_df, thinned_remainder_df], ignore_index=True)
+    result = (
+        pd.concat([protected_df, thinned_remainder], ignore_index=True)
           .reset_index(drop=True)
     )
 
-    if thin_df[user_col].nunique() != df[user_col].nunique():
-        raise AssertionError(
-            f"User count mismatch after thinning. "
-            f"Expected {df[user_col].nunique()}, got {thin_df[user_col].nunique()}."
-        )
-
-    if len(thin_df) != target_total_keep:
-        raise AssertionError(
-            f"Row count mismatch after thinning. "
-            f"Expected {target_total_keep}, got {len(thin_df)}."
-        )
-
-    return thin_df
-
-#C1: Cut random
-def random_thin_interactions(
-    df: pd.DataFrame,
-    keep_frac: float,
-    seed: int = 42
-) -> pd.DataFrame:
-    """
-    random giữ lại record theo tỉ lệ keep_fracs
-    """
-# làm tròn số dòng sau khi nhân với tỉ lệ keep_frac để cut
-    n_keep = int(round(len(df) * keep_frac))
-
-#random lấy số dòng
-    thin_df = (
-        df.sample(n=n_keep, random_state=seed, replace=False)
-          .copy()
-          .reset_index(drop=True)
+    assert set(result[user_col]) == set(df[user_col]), (
+        "BUG: user set not preserved after thinning. "
+        f"Missing: {set(df[user_col]) - set(result[user_col])}"
+    )
+    assert set(result[item_col]) == set(df[item_col]), (
+        "BUG: item set not preserved after thinning. "
+        f"Missing: {set(df[item_col]) - set(result[item_col])}"
     )
 
-    return thin_df
+    return result
 
+
+# ---------------------------------------------------------------------------
+# Batch thinning helpers
+# ---------------------------------------------------------------------------
 
 def generate_random_thinning_levels(
     df: pd.DataFrame,
     keep_fracs: list[float],
+    user_col: str,
+    item_col: str,
+    timestamp_col: str,
     seed: int = 42,
-    user_col: str | None = None,
-    timestamp_col: str | None = None,
-    protect_first_interaction: bool = False
 ) -> dict[str, pd.DataFrame]:
     """
-    Gen nhiều dataset tương ứng với list keep_frac bằng random thinning.
+    Produce multiple random-thinned datasets, one per keep_frac.
+
+    All outputs share the same user set and item set as df.
+
+    Returns
+    -------
+    {level_name: thinned_df}  e.g. {"keep0.1": df_thin, "keep0.5": df_thin2}
     """
-    outputs = {}
-
-    for i, keep_frac in enumerate(keep_fracs, start=1):
-        level_name = f"keep{keep_frac:g}"
-
-        if protect_first_interaction:
-            if user_col is None or timestamp_col is None:
-                raise ValueError(
-                    "user_col and timestamp_col are required when protect_first_interaction=True"
-                )
-
-            outputs[level_name] = thin_with_protected_first_interaction(
-                df=df,
-                user_col=user_col,
-                timestamp_col=timestamp_col,
-                keep_frac=keep_frac,
-                thinning_func=random_thin_interactions,
-                seed=seed + i,
-                thinning_kwargs={}
-            )
-
-        else:
-            outputs[level_name] = random_thin_interactions(
-                df=df,
-                keep_frac=keep_frac,
-                seed=seed + i
-            )
-
+    outputs: dict[str, pd.DataFrame] = {}
+    for i, kf in enumerate(keep_fracs, start=1):
+        level_name = f"keep{kf:g}"
+        outputs[level_name] = thin_with_protected_user_item_interactions(
+            df=df,
+            user_col=user_col,
+            item_col=item_col,
+            timestamp_col=timestamp_col,
+            keep_frac=kf,
+            thinning_func=random_thin_interactions,
+            seed=seed + i,
+        )
     return outputs
 
 
-#C2: Cut top item bằng cách đặt trần cap
+def generate_head_item_cut_levels(
+    df: pd.DataFrame,
+    keep_fracs: list[float],
+    user_col: str,
+    item_col: str,
+    timestamp_col: str,
+    seed: int = 42,
+    verbose: bool = True,
+) -> dict[str, pd.DataFrame]:
+    """
+    Produce multiple head-item-cut datasets, one per keep_frac.
+
+    All outputs share the same user set and item set as df.
+    """
+    outputs: dict[str, pd.DataFrame] = {}
+    for i, kf in enumerate(keep_fracs, start=1):
+        level_name = f"keep{kf:g}"
+        outputs[level_name] = thin_with_protected_user_item_interactions(
+            df=df,
+            user_col=user_col,
+            item_col=item_col,
+            timestamp_col=timestamp_col,
+            keep_frac=kf,
+            thinning_func=head_item_cut,
+            seed=seed + i,
+            thinning_kwargs={"item_col": item_col, "verbose": verbose},
+        )
+    return outputs
+
+
+def generate_tail_item_cut_levels(
+    df: pd.DataFrame,
+    keep_fracs: list[float],
+    user_col: str,
+    item_col: str,
+    timestamp_col: str,
+    seed: int = 42,
+    verbose: bool = True,
+) -> dict[str, pd.DataFrame]:
+    """
+    Produce multiple tail-item-cut datasets, one per keep_frac.
+
+    All outputs share the same user set and item set as df.
+    """
+    outputs: dict[str, pd.DataFrame] = {}
+    for i, kf in enumerate(keep_fracs, start=1):
+        level_name = f"keep{kf:g}"
+        outputs[level_name] = thin_with_protected_user_item_interactions(
+            df=df,
+            user_col=user_col,
+            item_col=item_col,
+            timestamp_col=timestamp_col,
+            keep_frac=kf,
+            thinning_func=tail_item_cut,
+            seed=seed + i,
+            thinning_kwargs={"item_col": item_col, "verbose": verbose},
+        )
+    return outputs
+
+
+# ---------------------------------------------------------------------------
+# Pure thinning functions (no protection, no assertions)
+# ---------------------------------------------------------------------------
+
+def random_thin_interactions(
+    df: pd.DataFrame,
+    keep_frac: float,
+    seed: int = 42,
+) -> pd.DataFrame:
+    """
+    Randomly keep keep_frac of rows.  No user/item protection.
+    """
+    n_keep = int(round(len(df) * keep_frac))
+    return (
+        df.sample(n=n_keep, random_state=seed, replace=False)
+          .reset_index(drop=True)
+    )
+
+
 def head_item_cut(
     df: pd.DataFrame,
     item_col: str,
     keep_frac: float,
     seed: int = 42,
     verbose: bool = True,
-    cap_log_every: int = 1000
+    cap_log_every: int = 1000,
 ) -> pd.DataFrame:
     """
-    Cut top item bằng cách đặt trần số interaction tối đa cho mỗi item.
+    Cap the number of interactions per item to reduce head-heavy items.
 
-    Logic:
-    - Tính số interaction cần giữ lại theo keep_frac.
-    - Đếm số interaction của từng item.
-    - Thử cap lần lượt từ 1, 2, 3,... cho đến khi đủ số dòng cần giữ.
-    - Với mỗi item, số dòng được giữ tối đa là cap.
-    - Nếu cap cuối cùng làm số dòng giữ lại bị vượt target,
-      thì giữ cap - 1 trước, sau đó random thêm phần còn thiếu.
+    Finds the smallest cap such that keeping at most cap interactions per
+    item yields >= target rows.  Items at the exact cap boundary are randomly
+    sub-sampled to hit the target precisely.
+
+    No user/item protection — use thin_with_protected_user_item_interactions
+    as the outer wrapper when protection is needed.
     """
     t_all = perf_counter()
-
     n_keep = int(round(len(df) * keep_frac))
 
     if verbose:
         print(
-            f"[HEAD] Start | keep_frac={keep_frac:.2f} | "
-            f"rows={len(df):,} | target_keep={n_keep:,}",
-            flush=True
+            f"[HEAD] keep_frac={keep_frac:.2f} | rows={len(df):,} | "
+            f"target={n_keep:,}",
+            flush=True,
         )
 
-    #nếu n_keep >= records df thì không cắt gì, còn nếu n_keep < 0 thì trả về rỗng
     if n_keep >= len(df):
         if verbose:
-            print("[HEAD] No cut needed", flush=True)
+            print("[HEAD] No cut needed.", flush=True)
         return df.copy().reset_index(drop=True)
 
     if n_keep <= 0:
         if verbose:
-            print("[HEAD] Target keep <= 0, return empty df", flush=True)
+            print("[HEAD] Target ≤ 0, returning empty df.", flush=True)
         return df.iloc[0:0].copy().reset_index(drop=True)
 
-    #tạo bộ random để random chọn item được cắt ở cap cuối
     rng = np.random.default_rng(seed)
 
-    # đếm số interaction theo item
-    t = perf_counter()
-
     item_groups = df.groupby(item_col, sort=False)
-
-    item_counts = (
-        item_groups
-        .size()
-        .sort_values(ascending=False)
-    )
-
+    item_counts = item_groups.size().sort_values(ascending=False)
     max_count = int(item_counts.max())
 
     if verbose:
         print(
-            f"[HEAD] Count item done | "
-            f"items={len(item_counts):,} | max_count={max_count:,} | "
-            f"time={perf_counter() - t:.2f}s",
-            flush=True
+            f"[HEAD] items={len(item_counts):,} | max_count={max_count:,}",
+            flush=True,
         )
 
-    # thử cap lần lượt từ 1, 2, 3,... cho đến khi đủ số dòng cần giữ
-    t = perf_counter()
-
+    # Binary search over cap value
     selected_cap = max_count
-
     for cap in range(1, max_count + 1):
         total_keep = int(np.minimum(item_counts.values, cap).sum())
-
         if verbose and (cap == 1 or cap % cap_log_every == 0):
             print(
-                f"[HEAD] Finding cap | cap={cap:,} | "
-                f"total_keep={total_keep:,} / {n_keep:,}",
-                flush=True
+                f"[HEAD] cap={cap:,} → total_keep={total_keep:,} / {n_keep:,}",
+                flush=True,
             )
-
         if total_keep >= n_keep:
             selected_cap = cap
             break
 
     cap = selected_cap
 
-    if verbose:
-        print(
-            f"[HEAD] Find cap done | selected_cap={cap:,} | "
-            f"time={perf_counter() - t:.2f}s",
-            flush=True
-        )
-
-    # giữ chắc chắn cap - 1 interaction trước
-    t = perf_counter()
-
+    # Keep cap-1 interactions for every item, then randomly add the remainder
     if cap > 1:
         keep_quota = item_counts.clip(upper=cap - 1).astype(int)
     else:
@@ -295,338 +406,112 @@ def head_item_cut(
 
     current_keep = int(keep_quota.sum())
     remaining_keep = n_keep - current_keep
-
-    # các item có count >= cap là những item còn có thể giữ thêm 1 dòng
     eligible_items = item_counts[item_counts >= cap].index.to_numpy()
 
     if remaining_keep > 0:
-        chosen_items = rng.choice(
-            eligible_items,
-            size=remaining_keep,
-            replace=False
-        )
-
+        chosen_items = rng.choice(eligible_items, size=remaining_keep, replace=False)
         keep_quota.loc[chosen_items] += 1
 
-    if verbose:
-        print(
-            f"[HEAD] Build keep quota done | "
-            f"current_keep={current_keep:,} | remaining_keep={remaining_keep:,} | "
-            f"final_keep={int(keep_quota.sum()):,} | "
-            f"time={perf_counter() - t:.2f}s",
-            flush=True
-        )
-
-    # lấy index theo item một lần, không quét lại df cho từng item
-    t = perf_counter()
-
     item_indices = item_groups.indices
-
-    if verbose:
-        print(
-            f"[HEAD] Build item_indices done | "
-            f"groups={len(item_indices):,} | "
-            f"time={perf_counter() - t:.2f}s",
-            flush=True
-        )
-
-    # tạo mask để đánh dấu dòng nào được giữ
-    t = perf_counter()
-
     keep_mask = np.zeros(len(df), dtype=bool)
 
     for item, quota in keep_quota.items():
         quota = int(quota)
-
         if quota <= 0:
             continue
-
-        item_idx = item_indices[item]
-
-        if quota >= len(item_idx):
-            keep_mask[item_idx] = True
+        idx = item_indices[item]
+        if quota >= len(idx):
+            keep_mask[idx] = True
         else:
-            chosen_idx = rng.choice(
-                item_idx,
-                size=quota,
-                replace=False
-            )
+            keep_mask[rng.choice(idx, size=quota, replace=False)] = True
 
-            keep_mask[chosen_idx] = True
+    result = df.iloc[keep_mask].copy().reset_index(drop=True)
 
     if verbose:
         print(
-            f"[HEAD] Build keep mask done | "
-            f"kept_rows={int(keep_mask.sum()):,} | "
-            f"time={perf_counter() - t:.2f}s",
-            flush=True
+            f"[HEAD] Done | cap={cap:,} | kept={len(result):,} | "
+            f"elapsed={perf_counter() - t_all:.2f}s",
+            flush=True,
         )
 
-    # cắt dataframe một lần bằng mask
-    t = perf_counter()
-
-    thin_df = (
-        df.iloc[keep_mask]
-          .copy()
-          .reset_index(drop=True)
-    )
-
-    if verbose:
-        print(
-            f"[HEAD] Slice df done | "
-            f"thin_rows={len(thin_df):,} | "
-            f"time={perf_counter() - t:.2f}s",
-            flush=True
-        )
-
-        print(
-            f"[HEAD] Done | total_time={perf_counter() - t_all:.2f}s",
-            flush=True
-        )
-
-    return thin_df
+    return result
 
 
-def generate_head_item_cut_levels(
-    df: pd.DataFrame,
-    item_col: str,
-    keep_fracs: list[float],
-    seed: int = 42,
-    verbose: bool = True,
-    user_col: str | None = None,
-    timestamp_col: str | None = None,
-    protect_first_interaction: bool = False
-) -> dict[str, pd.DataFrame]:
-    """
-    Gen nhiều dataset tương ứng với list keep_frac bằng head-item cut.
-    """
-    outputs = {}
-
-    for i, keep_frac in enumerate(keep_fracs, start=1):
-        level_name = f"keep{keep_frac:g}"
-
-        if protect_first_interaction:
-            if user_col is None or timestamp_col is None:
-                raise ValueError(
-                    "user_col and timestamp_col are required when protect_first_interaction=True"
-                )
-
-            outputs[level_name] = thin_with_protected_first_interaction(
-                df=df,
-                user_col=user_col,
-                timestamp_col=timestamp_col,
-                keep_frac=keep_frac,
-                thinning_func=head_item_cut,
-                seed=seed + i,
-                thinning_kwargs={
-                    "item_col": item_col,
-                    "verbose": verbose
-                }
-            )
-
-        else:
-            outputs[level_name] = head_item_cut(
-                df=df,
-                item_col=item_col,
-                keep_frac=keep_frac,
-                seed=seed + i,
-                verbose=verbose
-            )
-
-    return outputs
-
-
-#C3: Cut tail item
 def tail_item_cut(
     df: pd.DataFrame,
     item_col: str,
     keep_frac: float,
     seed: int = 42,
-    verbose: bool = True
+    verbose: bool = True,
 ) -> pd.DataFrame:
     """
-    Cut tail item bằng cách cắt sạch item ít interaction trước.
+    Remove all interactions of the rarest items (tail) until the target row
+    count is reached.  The last item that would exceed the removal budget is
+    partially removed via random sampling.
 
-    Logic:
-    - Tính số interaction cần giữ lại theo keep_frac.
-    - Tính số interaction cần xóa.
-    - Sắp xếp item theo số interaction tăng dần.
-    - Cắt sạch tail item cho đến khi đủ số lượng cần xóa.
-    - Nếu item cuối cùng làm vượt số lượng cần xóa,
-      thì chỉ random xóa một phần interaction của item đó.
+    No user/item protection — use thin_with_protected_user_item_interactions
+    as the outer wrapper when protection is needed.
     """
     t_all = perf_counter()
-
     n_keep = int(round(len(df) * keep_frac))
     n_remove = len(df) - n_keep
 
     if verbose:
         print(
-            f"[TAIL] Start | keep_frac={keep_frac:.2f} | "
-            f"rows={len(df):,} | target_keep={n_keep:,} | "
-            f"target_remove={n_remove:,}",
-            flush=True
+            f"[TAIL] keep_frac={keep_frac:.2f} | rows={len(df):,} | "
+            f"target_keep={n_keep:,} | target_remove={n_remove:,}",
+            flush=True,
         )
 
     if n_remove <= 0:
         if verbose:
-            print("[TAIL] No cut needed", flush=True)
+            print("[TAIL] No cut needed.", flush=True)
         return df.copy().reset_index(drop=True)
 
     if n_keep <= 0:
         if verbose:
-            print("[TAIL] Target keep <= 0, return empty df", flush=True)
+            print("[TAIL] Target keep ≤ 0, returning empty df.", flush=True)
         return df.iloc[0:0].copy().reset_index(drop=True)
 
     rng = np.random.default_rng(seed)
-
-    # đếm số interaction theo item, item ít interaction đứng trước
-    t = perf_counter()
-
     item_groups = df.groupby(item_col, sort=False)
-    item_counts = (
-    item_groups
-    .size()
-    .sort_values(ascending=True)
-)
-    
-
-    if verbose:
-        print(
-            f"[TAIL] Count item done | "
-            f"items={len(item_counts):,} | "
-            f"min_count={int(item_counts.min()):,} | "
-            f"max_count={int(item_counts.max()):,} | "
-            f"time={perf_counter() - t:.2f}s",
-            flush=True
-        )
-
-    # lấy index theo item một lần, không quét lại df cho từng item
-    t = perf_counter()
-
+    item_counts = item_groups.size().sort_values(ascending=True)
     item_indices = item_groups.indices
 
     if verbose:
         print(
-            f"[TAIL] Build item_indices done | "
-            f"groups={len(item_indices):,} | "
-            f"time={perf_counter() - t:.2f}s",
-            flush=True
+            f"[TAIL] items={len(item_counts):,} | "
+            f"min={int(item_counts.min()):,} | max={int(item_counts.max()):,}",
+            flush=True,
         )
-
-    # tạo mask ban đầu là giữ tất cả, sau đó đánh dấu False cho dòng bị xóa
-    t = perf_counter()
 
     keep_mask = np.ones(len(df), dtype=bool)
     remaining_remove = n_remove
-
-    n_full_removed_items = 0
-    n_partial_removed_items = 0
+    n_full_removed = 0
+    n_partial_removed = 0
 
     for item, count in item_counts.items():
         if remaining_remove <= 0:
             break
-
-        item_idx = item_indices[item]
         count = int(count)
-
-        # nếu cắt sạch item này vẫn chưa vượt số dòng cần xóa
+        idx = item_indices[item]
         if count <= remaining_remove:
-            keep_mask[item_idx] = False
+            keep_mask[idx] = False
             remaining_remove -= count
-            n_full_removed_items += 1
-
-        # nếu cắt sạch item này bị vượt thì chỉ xóa một phần
+            n_full_removed += 1
         else:
-            chosen_idx = rng.choice(
-                item_idx,
-                size=remaining_remove,
-                replace=False
-            )
-
-            keep_mask[chosen_idx] = False
+            keep_mask[rng.choice(idx, size=remaining_remove, replace=False)] = False
             remaining_remove = 0
-            n_partial_removed_items += 1
+            n_partial_removed += 1
+
+    result = df.iloc[keep_mask].copy().reset_index(drop=True)
 
     if verbose:
         print(
-            f"[TAIL] Build keep mask done | "
-            f"full_removed_items={n_full_removed_items:,} | "
-            f"partial_removed_items={n_partial_removed_items:,} | "
-            f"removed_rows={len(df) - int(keep_mask.sum()):,} | "
-            f"kept_rows={int(keep_mask.sum()):,} | "
-            f"time={perf_counter() - t:.2f}s",
-            flush=True
+            f"[TAIL] Done | full_removed_items={n_full_removed:,} | "
+            f"partial_removed_items={n_partial_removed:,} | "
+            f"kept={len(result):,} | elapsed={perf_counter() - t_all:.2f}s",
+            flush=True,
         )
 
-    # cắt dataframe một lần bằng mask
-    t = perf_counter()
-
-    thin_df = (
-        df.iloc[keep_mask]
-          .copy()
-          .reset_index(drop=True)
-    )
-
-    if verbose:
-        print(
-            f"[TAIL] Slice df done | "
-            f"thin_rows={len(thin_df):,} | "
-            f"time={perf_counter() - t:.2f}s",
-            flush=True
-        )
-
-        print(
-            f"[TAIL] Done | total_time={perf_counter() - t_all:.2f}s",
-            flush=True
-        )
-
-    return thin_df
-
-def generate_tail_item_cut_levels(
-    df: pd.DataFrame,
-    item_col: str,
-    keep_fracs: list[float],
-    seed: int = 42,
-    verbose: bool = True,
-    user_col: str | None = None,
-    timestamp_col: str | None = None,
-    protect_first_interaction: bool = False
-) -> dict[str, pd.DataFrame]:
-    """
-    Gen nhiều dataset tương ứng với list keep_frac bằng tail-item cut.
-    """
-    outputs = {}
-
-    for i, keep_frac in enumerate(keep_fracs, start=1):
-        level_name = f"keep{keep_frac:g}"
-
-        if protect_first_interaction:
-            if user_col is None or timestamp_col is None:
-                raise ValueError(
-                    "user_col and timestamp_col are required when protect_first_interaction=True"
-                )
-
-            outputs[level_name] = thin_with_protected_first_interaction(
-                df=df,
-                user_col=user_col,
-                timestamp_col=timestamp_col,
-                keep_frac=keep_frac,
-                thinning_func=tail_item_cut,
-                seed=seed + i,
-                thinning_kwargs={
-                    "item_col": item_col,
-                    "verbose": verbose
-                }
-            )
-
-        else:
-            outputs[level_name] = tail_item_cut(
-                df=df,
-                item_col=item_col,
-                keep_frac=keep_frac,
-                seed=seed + i,
-                verbose=verbose
-            )
-
-    return outputs
+    return result

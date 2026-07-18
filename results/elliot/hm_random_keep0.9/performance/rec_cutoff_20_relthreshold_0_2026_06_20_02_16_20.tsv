@@ -1,2 +1,0 @@
-model	Precision	Recall	nDCG	MAP	MRR	Precision_u1	Recall_u1	nDCG_u1	MAP_u1	MRR_u1
-VSM_sim=cosine_up=tfidf_ip=tfidf_load=ItemAttributes	0.003956972723780253	0.015741609123536858	0.00898208787839224	0.0035838754113645906	0.01201068964316063					

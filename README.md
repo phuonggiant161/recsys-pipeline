@@ -4,7 +4,7 @@ Pipeline nghiên cứu ảnh hưởng của data sparsity đến chất lượng
 
 **Luồng chính:**
 ```
-Raw data → k-core filtering → Train/Test split → Thinning → Elliot training & evaluation
+Raw data → k-core filtering → Train/Test split → Thinning → Elliot & RecBole training & evaluation
 ```
 
 ---
@@ -13,23 +13,28 @@ Raw data → k-core filtering → Train/Test split → Thinning → Elliot train
 
 ```
 recsys-pipeline/
-├── main.py                        # Pipeline chính (kcore → split → thinning)
+├── preprocess.py                        # Pipeline chính (kcore → split → thinning)
 ├── src/
 │   ├── config.py                  # Khai báo dataset (input path, cột)
 │   ├── thinning.py                # 3 chiến lược thinning: random, head-item, tail-item
 │   ├── dataset_folder.py          # Lưu train/valid/test + tự export .tsv cho Elliot
 │   └── ...
 ├── scripts/
-│   ├── generate_elliot_configs.py   # Tự sinh Elliot config từ data/processed/
-│   ├── run_elliot.py                # Chạy Elliot experiments từ repo root
-│   └── build_vsm_item_attributes.py # Sinh item_attributes.tsv cho model VSM
+│   ├── generate_elliot_configs.py      # Tự sinh Elliot config từ data/processed/
+│   ├── run_elliot.py                   # Chạy Elliot experiments từ repo root
+│   ├── build_vsm_item_attributes.py    # Sinh item_attributes.tsv cho model VSM
+│   ├── recbole_prepare_data.py         # Convert processed CSVs → RecBole atomic files (.inter)
+│   └── recbole_run.py                  # Chạy RecBole experiments (BPR / ItemKNN)
+├── configs/recbole/
+│   ├── bpr.yml                         # Config model BPR (dùng chung cho mọi dataset)
+│   └── itemknn.yml                     # Config model ItemKNN (dùng chung cho mọi dataset)
 ├── external/elliot/               # Elliot framework
 ├── data/
 │   ├── raw/                       # Dữ liệu thô (không commit)
 │   │   ├── hm.csv
 │   │   ├── metadata_hm.csv        # Article attributes (article_id, prod_name, detail_desc, ...)
 │   │   └── amazon.parquet
-│   ├── processed/                 # Output của main.py (không commit)
+│   ├── processed/                 # Output của preprocess.py (không commit)
 │   │   └── {folder}/
 │   │       ├── train.tsv / valid.tsv / test.tsv   # Elliot format
 │   │       └── item_attributes.tsv                # Cho VSM (sinh bởi build_vsm_item_attributes.py)
@@ -76,14 +81,14 @@ pip install -e external/elliot/ --no-deps
 Sau khi cài đặt xong, mỗi lần chạy chỉ cần **3 lệnh**:
 
 ```bash
-python main.py                               # Bước 1: sinh data/processed/
+python preprocess.py                               # Bước 1: sinh data/processed/
 python scripts/generate_elliot_configs.py    # Bước 2: sinh Elliot config YAML
 python scripts/run_elliot.py                 # Bước 3: chạy Elliot
 ```
 
 ### Tùy chọn thêm
 
-**Bước 1** — có thể sửa tham số trực tiếp trong `main.py` (đầu file) hoặc truyền qua CLI:
+**Bước 1** — có thể sửa tham số trực tiếp trong `preprocess.py` (đầu file) hoặc truyền qua CLI:
 
 Cách 1 — sửa constants trong file:
 ```python
@@ -96,11 +101,11 @@ KEEP_FRACS   = ;
 Cách 2 — truyền qua CLI (override constants):
 ```bash
 # k_user = k_item = 20 (backward compat)
-python main.py --dataset hm --k 20
+python preprocess.py --dataset hm --k 20
 
 # k_user và k_item khác nhau
-python main.py --dataset hm --k-user 10 --k-item 30
-python main.py --dataset amazon --k-user 3 --k-item 10
+python preprocess.py --dataset hm --k-user 10 --k-item 30
+python preprocess.py --dataset amazon --k-user 3 --k-item 10
 ```
 
 **Bước 2** — các flag hữu ích:
@@ -126,7 +131,7 @@ Kết quả ghi vào `results/elliot/{tên_dataset}/performance/`.
 
 ## VSM — Sinh item attributes
 
-Cần chạy **một lần** sau `main.py`, trước khi gen config VSM.
+Cần chạy **một lần** sau `preprocess.py`, trước khi gen config VSM.
 Script đọc các text columns từ metadata, vectorize bằng CountVectorizer, sinh file integer feature dùng chung cho toàn bộ experiments.
 
 ```bash
@@ -147,6 +152,66 @@ Output: một file dùng chung cho tất cả experiments của dataset đó (fo
 
 ---
 
+## RecBole — Benchmark bổ sung (source)
+
+RecBole chạy song song với Elliot trên cùng dữ liệu đã split sẵn, kết quả lưu riêng tại `results/recbole/`.
+
+Source RecBole nằm trong `external/recbole/`. Project wrapper nằm trong `scripts/recbole_*.py`.
+
+Config model được định nghĩa **một lần duy nhất** tại `configs/recbole/bpr.yml` và `configs/recbole/itemknn.yml` — dùng chung cho mọi dataset, không cần sinh lại.
+
+### Clone RecBole source (1 lần duy nhất)
+
+```bash
+git clone https://github.com/RUCAIBox/RecBole.git external/recbole
+pip install -e external/recbole/
+```
+
+Nếu thiếu dependency:
+```bash
+pip install -r external/recbole/requirements.txt
+```
+
+> RecBole phụ thuộc PyTorch. BPR dùng `use_gpu: true`, ItemKNN dùng `use_gpu: false`.
+
+### Chạy RecBole (BPR & ItemKNN)
+
+**Bước 1 — Convert dữ liệu sang RecBole atomic files:**
+
+```bash
+# 1 dataset
+python scripts/recbole_prepare_data.py --dataset hm_random_keep0.1 --overwrite
+
+# Tất cả datasets
+python scripts/recbole_prepare_data.py --all --overwrite
+```
+
+**Bước 2 — Chạy experiment:**
+
+```bash
+# 1 dataset, 1 model
+python scripts/recbole_run.py --dataset hm_random_keep0.1 --model BPR --overwrite
+python scripts/recbole_run.py --dataset hm_random_keep0.1 --model ItemKNN --overwrite
+
+# 1 dataset, cả hai model
+python scripts/recbole_run.py --dataset hm_random_keep0.1 --model all --overwrite
+
+# Tất cả datasets
+python scripts/recbole_run.py --all --model all --overwrite
+
+# Tất cả datasets, lọc theo tên
+python scripts/recbole_run.py --all --model ItemKNN --filter hm_random --overwrite
+```
+
+Kết quả ghi vào `results/recbole/<dataset>/performance/{BPR,ItemKNN}_recbole.tsv`.
+
+**Ghi chú:**
+- Config dùng `benchmark_filename: [train, valid, test]` — RecBole đọc split có sẵn, không tự split lại.
+- Bỏ qua dataset đã có kết quả nếu không truyền `--overwrite`.
+- Khi so sánh với Elliot: RecBole mask cả train+valid khi test, Elliot chỉ mask train — metrics có thể khác nhau một chút.
+
+---
+
 ## Metrics
 
 Mỗi experiment đánh giá các metrics sau:
@@ -164,6 +229,6 @@ Mỗi experiment đánh giá các metrics sau:
 | `MAP_u1` | MAP@k — nhóm user ≤ 1 train interaction |
 | `MRR_u1` | MRR@k — nhóm user ≤ 1 train interaction |
 
-Metric `_u1` trả về `NaN` nếu không có user nào trong nhóm (ví dụ: base split với k=20 kcore, tất cả user đều có nhiều hơn 1 train interaction).
+Metric `_u1` trả về `0.0` nếu không có user nào trong nhóm (ví dụ: base split với k=20 kcore, tất cả user đều có nhiều hơn 1 train interaction).
 
 Cutoffs mặc định: `[10, 20, 50]`.

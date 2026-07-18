@@ -1,5 +1,0 @@
-2026-06-12 01:36:34.702347: I Loading parameters
-2026-06-12 01:36:34.702347: I Parameter name set to 
-2026-06-12 01:36:34.703345: I Parameter path set to ../../results/elliot/hm_k20_head_keep0.1/recs/ItemKNN_nn=40_sim=cosine_imp=standard_bin=False_shrink=0_norm=True_asymalpha=_tvalpha=_tvbeta=_rweights=.tsv
-2026-06-12 01:41:06.494661: I Finished
-2026-06-12 01:41:06.502392: I ******************************************

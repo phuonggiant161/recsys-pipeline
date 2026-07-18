@@ -1,9 +1,0 @@
-2026-06-20 23:42:59.011520: I Loading parameters
-2026-06-20 23:42:59.012526: I Parameter similarity set to cosine
-2026-06-20 23:42:59.012526: I Parameter user_profile set to tfidf
-2026-06-20 23:42:59.012526: I Parameter item_profile set to tfidf
-2026-06-20 23:42:59.012526: I Parameter loader set to ItemAttributes
-2026-06-20 23:46:37.994713: I The similarity computation has taken: 45.08972668647766
-2026-06-21 00:12:10.475143: I Finished
-2026-06-21 00:12:10.476146: I Writing recommendations at: D:\recsys-pipeline\results\elliot\amazon_dedup_base_split\recs
-2026-06-21 00:12:12.565936: I ******************************************

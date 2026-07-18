@@ -1,0 +1,10 @@
+Repository URL : https://github.com/RUCAIBox/RecBole.git
+Commit hash    : 7b02be5ec80a88310f2d04a27a82adfcbb5dc211
+Branch         : master
+Tag            : (none)
+Date recorded  : 2026-07-12
+
+Note: RecBole source is vendored into this repository to ensure full
+reproducibility of experiments without requiring a separate clone.
+The .git directory has been removed; this copy is managed by the
+parent repository (recsys-pipeline).

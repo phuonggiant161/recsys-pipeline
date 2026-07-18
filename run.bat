@@ -2,5 +2,5 @@
 python -m venv venv
 call venv\Scripts\activate
 pip install -r requirements.txt
-python main.py
+python preprocess.py
 pause

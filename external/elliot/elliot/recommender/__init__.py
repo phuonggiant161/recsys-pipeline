@@ -25,4 +25,7 @@ from .content_based import VSM
 # from .adversarial import AMF, AMR
 # from .gan import IRGAN, CFGAN
 from .generic import ProxyRecommender
+from elliot.recommender.latent_factor_models.MF.matrix_factorization import MF
+from elliot.recommender.latent_factor_models.FM.factorization_machine import FM
+from elliot.recommender.latent_factor_models.FunkSVD.funk_svd import FunkSVD
 
