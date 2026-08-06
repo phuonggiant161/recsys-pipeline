@@ -884,3 +884,60 @@ class U1MRR(TopkMetric):
 
     def metric_info(self, pos_index):
         return MRR.metric_info(self, pos_index)
+
+def _tailitem_filter(dataobject):
+    """Get the bool matrix indicating whether the corresponding item is positive and a tail item
+    and number of such items for each user.
+    """
+ 
+    # rec_mat   = dataobject.get("rec.topk").numpy()          # (N, max_k+1)    
+    # pos_index = rec_mat[:, :-1].astype(bool)                # (N, max_k)
+    # pos_len   = rec_mat[:, -1]                              # (N,)
+   
+    rectail_mat   = dataobject.get("rec.topktail").numpy()
+    pos_tail_index = rectail_mat[:, :-1].astype(bool)                # (N, max_k)
+    pos_tail_len   = rectail_mat[:, -1]                              # (N,)
+ 
+    # select users that have at least one groundtruth tail item
+    u_mask   = pos_tail_len > 0                    
+   
+    return pos_tail_index[u_mask], pos_tail_len[u_mask]
+   
+ 
+class TailRecall(TopkMetric):
+    r"""Recall_ for tail items (defined by tail_ratio)."""
+ 
+    metric_need = ["data.tail_items", "rec.topktail","data.count_items"]
+ 
+    def __init__(self, config):
+        super().__init__(config)
+           
+    def calculate_metric(self, dataobject):
+        pos_index, pos_len = _tailitem_filter(dataobject)        
+               
+        result = self.metric_info(pos_index, pos_len)        
+        metric_dict = _u1_topk_result("tailrecall", result, self.topk, self.decimal_place)
+        return metric_dict
+ 
+    def metric_info(self, pos_index, pos_len):
+        return Recall.metric_info(self, pos_index, pos_len)  
+ 
+class TailNDCG(TopkMetric):
+    r"""NDCG_ for tail items (defined by tail_ratio)."""
+ 
+    metric_need = ["data.tail_items", "rec.topktail","data.count_items"]
+ 
+    def __init__(self, config):
+        super().__init__(config)
+           
+    def calculate_metric(self, dataobject):
+        pos_index, pos_len = _tailitem_filter(dataobject)        
+               
+        result = self.metric_info(pos_index, pos_len)        
+        metric_dict = _u1_topk_result("tailndcg", result, self.topk, self.decimal_place)
+        return metric_dict
+ 
+    def metric_info(self, pos_index, pos_len):
+        return NDCG.metric_info(self, pos_index, pos_len)
+
+

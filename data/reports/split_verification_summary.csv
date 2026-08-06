@@ -1,0 +1,17 @@
+folder,split_method,C01_nonempty,C02_no_train_valid_overlap,C03_no_train_test_overlap,C04_no_valid_test_overlap,C05_valid_users_in_train,C06_test_users_in_train,C07_valid_items_in_train,C08_test_items_in_train,C09_temporal_train_valid,C10_temporal_train_test,C11_valid_quota_per_user,C12_test_quota_per_user,C13_test_matches_base
+amazon_dedup_base_split,userwise_temporal_holdout_with_coverage,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,BASE
+amazon_head_keep0.1,userwise_temporal_holdout_with_coverage,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,N/A,PASS
+amazon_random_keep0.1,userwise_temporal_holdout_with_coverage,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,N/A,PASS
+amazon_random_keep0.3,userwise_temporal_holdout_with_coverage,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,N/A,PASS
+amazon_random_keep0.5,userwise_temporal_holdout_with_coverage,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,N/A,PASS
+amazon_random_keep0.7,userwise_temporal_holdout_with_coverage,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,N/A,PASS
+amazon_random_keep0.9,userwise_temporal_holdout_with_coverage,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,N/A,PASS
+amazon_tail_keep0.1,userwise_temporal_holdout_with_coverage,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,N/A,PASS
+hm_dedup_base_split,userwise_temporal_holdout_with_coverage,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,BASE
+hm_head_keep0.1,userwise_temporal_holdout_with_coverage,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,N/A,PASS
+hm_random_keep0.05,userwise_temporal_holdout_with_coverage,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,N/A,PASS
+hm_random_keep0.1,userwise_temporal_holdout_with_coverage,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,N/A,PASS
+hm_random_keep0.5,userwise_temporal_holdout_with_coverage,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,N/A,PASS
+hm_random_keep0.7,userwise_temporal_holdout_with_coverage,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,N/A,PASS
+hm_random_keep0.9,userwise_temporal_holdout_with_coverage,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,N/A,PASS
+hm_tail_keep0.1,userwise_temporal_holdout_with_coverage,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,PASS,N/A,PASS

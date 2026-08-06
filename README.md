@@ -112,7 +112,8 @@ python preprocess.py --dataset amazon --k-user 3 --k-item 10
 ```bash
 python scripts/generate_elliot_configs.py --model ItemKNN            # chỉ gen ItemKNN
 python scripts/generate_elliot_configs.py --model VSM                # chỉ gen VSM
-python scripts/generate_elliot_configs.py --model ItemKNN VSM        # gen cả hai
+python scripts/generate_elliot_configs.py --model FunkSVD            # chỉ gen FunkSVD
+python scripts/generate_elliot_configs.py --model ItemKNN VSM FunkSVD  # gen cả ba
 python scripts/generate_elliot_configs.py --model ItemKNN --filter hm_random  # subset
 python scripts/generate_elliot_configs.py --model ItemKNN --overwrite          # gen lại
 ```
@@ -122,6 +123,7 @@ python scripts/generate_elliot_configs.py --model ItemKNN --overwrite          #
 python scripts/run_elliot.py --filter hm_random              # chỉ chạy subset
 python scripts/run_elliot.py --config hm_random_keep0.05_itemknn     # 1 experiment
 python scripts/run_elliot.py --config hm_random_keep0.05_vsm         # 1 experiment VSM
+python scripts/run_elliot.py --config hm_random_keep0.05_funksvd     # 1 experiment FunkSVD
 python scripts/run_elliot.py --filter hm_random --dry-run            # xem lệnh, không chạy
 ```
 

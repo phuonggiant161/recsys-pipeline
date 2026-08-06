@@ -1,0 +1,39 @@
+experiment:
+  dataset: amazon_random_keep0.5
+
+  data_config:
+    strategy: fixed
+    train_path: ../../../data/processed/amazon_random_keep0.5/train.tsv
+    validation_path: ../../../data/processed/amazon_random_keep0.5/valid.tsv
+    test_path: ../../../data/processed/amazon_random_keep0.5/test.tsv
+
+  top_k: 50
+
+  evaluation:
+    cutoffs: [10, 20, 50]
+    simple_metrics: [Precision, Recall, nDCG, MAP, MRR, Precision_u1, Recall_u1, nDCG_u1, MAP_u1, MRR_u1]
+
+  path_output_rec_result: ../../results/elliot/amazon_random_keep0.5/recs/
+  path_output_rec_performance: ../../results/elliot/amazon_random_keep0.5/performance/
+  path_log_folder: ../../results/elliot/amazon_random_keep0.5/logs/
+
+  gpu: -1
+
+  models:
+    FunkSVD:
+      meta:
+        save_recs: True
+        validation_metric: nDCG@10
+        validation_rate: 1
+      epochs: 100
+      batch_size: 512
+      factors: 64
+      lr: 0.0001
+      reg_w: 0.1
+      reg_b: 0.001
+      early_stopping:
+        monitor: nDCG@10
+        mode: max
+        patience: 10
+        min_delta: 0.0001
+        verbose: True

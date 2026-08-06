@@ -1,0 +1,32 @@
+[
+    {
+        "default_validation_metric": "Precision",
+        "default_validation_cutoff": 10,
+        "rel_threshold": 0
+    },
+    {
+        "meta": {
+            "save_recs": true,
+            "validation_metric": "nDCG@10",
+            "validation_rate": 1
+        },
+        "recommender": "FunkSVD_seed=42_e=100_bs=512_factors=64_lr=0$0001_reg_w=0$1_reg_b=0$001",
+        "configuration": {
+            "epochs": 100,
+            "batch_size": 512,
+            "factors": 64,
+            "lr": 0.0001,
+            "reg_w": 0.1,
+            "reg_b": 0.001,
+            "early_stopping": {
+                "monitor": "nDCG@10",
+                "mode": "max",
+                "patience": 10,
+                "min_delta": 0.0001,
+                "verbose": true
+            },
+            "name": "FunkSVD_seed=42_e=100_bs=512_factors=64_lr=0$0001_reg_w=0$1_reg_b=0$001",
+            "best_iteration": 9
+        }
+    }
+]

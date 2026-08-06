@@ -92,6 +92,29 @@ class Collector(object):
             self.data_struct.set("data.count_items", train_data.dataset.item_counter)
         if self.register.need("data.count_users"):
             self.data_struct.set("data.count_users", train_data.dataset.user_counter)
+        
+        if self.register.need("data.tail_items"):
+            # retrieve the tail_ratio from the config
+            tail_ratio = self.config["tail_ratio"]        
+            if tail_ratio is None or tail_ratio <= 0:
+                tail_ratio = 0.1
+ 
+            # retrieve the item interaction counts from the data_struct
+            count_items = self.data_struct.get("data.count_items")  
+ 
+            # determine the threshold for tail items based on the tail_ratio            
+            if tail_ratio >= 1:
+                self.tail_threshold = tail_ratio
+            else:  
+                sorted_count_items = sorted(self.data_struct.get("data.count_items").values())                
+                ncut = max(int(len(sorted_count_items) * tail_ratio), 1)
+                self.tail_threshold = sorted_count_items[ncut - 1]  # threshold for tail items
+            print(f"tail_threshold: {self.tail_threshold}")
+ 
+            # identify tail items as those with interaction counts less than or equal to the threshold
+            tail_items = {item for item, cnt in count_items.items() if cnt <= self.tail_threshold}
+            self.data_struct.set("data.tail_items", tail_items)
+            print(f"Identified {len(self.data_struct.get('data.tail_items'))} tail items.")
 
     def _average_rank(self, scores):
         """Get the ranking of an ordered tensor, and take the average of the ranking for positions with equal values.
@@ -202,6 +225,30 @@ class Collector(object):
             self.data_struct.update_tensor(
                 "data.user_ids", interaction[uid_field].to(self.device)
             )
+        
+ 
+        if self.register.need("rec.topktail"):
+ 
+            # retrieve the tail items from the data_struct
+            tail_items = self.data_struct.get("data.tail_items")
+            if len(tail_items) > 0:
+                mask = torch.tensor(
+                    [item in tail_items for item in positive_i.tolist()],
+                    dtype=torch.bool,
+                    device=positive_i.device,
+                )
+                positive_u, positive_i =  positive_u[mask], positive_i[mask]
+           
+            _, topk_idx = torch.topk(
+                scores_tensor, max(self.topk), dim=-1
+            )  # n_users x k
+            pos_matrix = torch.zeros_like(scores_tensor, dtype=torch.int)
+            pos_matrix[positive_u, positive_i] = 1
+            pos_len_list = pos_matrix.sum(dim=1, keepdim=True)
+            pos_idx = torch.gather(pos_matrix, dim=1, index=topk_idx)
+            result = torch.cat((pos_idx, pos_len_list), dim=1)
+            self.data_struct.update_tensor("rec.topktail", result)
+ 
 
     def model_collect(self, model: torch.nn.Module):
         """Collect the evaluation resource from model.

@@ -26,16 +26,24 @@ class EarlyStopping:
             if self.monitor == "loss":
                 if not hasattr(early_stopping_ns, "mode"):
                     self.mode = "min"
-                elif early_stopping_ns.mode == "auto":
+                elif early_stopping_ns.mode in ("auto", "min"):
                     self.mode = "min"
+                elif early_stopping_ns.mode == "max":
+                    self.mode = "max"
+                else:
+                    raise ValueError(f"mode must be one of [min, max, auto], got: {early_stopping_ns.mode!r}")
                 # observed_quantity = self._losses
                 self.metric = False
-    
+
             else:
                 if not hasattr(early_stopping_ns, "mode"):
                     self.mode = "max"
-                elif early_stopping_ns.mode == "auto":
+                elif early_stopping_ns.mode in ("auto", "max"):
                     self.mode = "max"
+                elif early_stopping_ns.mode == "min":
+                    self.mode = "min"
+                else:
+                    raise ValueError(f"mode must be one of [min, max, auto], got: {early_stopping_ns.mode!r}")
     
                 metric = self.monitor.split("@")
                 if metric[0].lower() not in [m.lower() for m in self.simple_metrics]:

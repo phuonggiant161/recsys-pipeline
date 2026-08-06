@@ -6,6 +6,202 @@ import pandas as pd
 from src.thinning import build_protected_row_ids
 
 
+def userwise_temporal_holdout_with_coverage(
+    df: pd.DataFrame,
+    user_col: str,
+    item_col: str,
+    timestamp_col: str,
+    holdout_size: float,
+    split_name: str = "holdout",
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Per-user temporal suffix split with protected user+item coverage.
+
+    For each user u with n_u interactions:
+        desired_u  = min(ceil(n_u * holdout_size), n_u - 1)
+        window_u   = contiguous suffix after user u's last protected interaction
+        actual_u   = min(desired_u, len(window_u))
+        holdout_u  = latest actual_u rows of window_u
+
+    No global row target, no heap, no cross-user timestamp comparison.
+    Shortfall (desired_u > actual_u) is valid when protected rows block the
+    suffix — it is not an error condition.
+
+    Guarantees
+    ----------
+    * remainder contains every user and every item from df.
+    * holdout users and items are subsets of remainder users and items.
+    * holdout is a temporal suffix for every user represented in holdout.
+    * len(remainder) + len(holdout) == len(df).
+    * No user has zero interactions in remainder.
+    * Each user's holdout count <= desired_u.
+    """
+    if not 0 < holdout_size < 1:
+        raise ValueError("holdout_size must be between 0 and 1.")
+
+    work = df.reset_index(drop=True).copy()
+    work["__row_id"] = np.arange(len(work), dtype=np.int64)
+
+    # Fail-fast: unparseable timestamps would silently shrink the dataset.
+    parsed_ts = pd.to_datetime(work[timestamp_col], errors="coerce")
+    n_bad = int(parsed_ts.isna().sum())
+    if n_bad > 0:
+        raise ValueError(
+            f"[{split_name}] {n_bad:,} row(s) have unparseable timestamps in "
+            f"column '{timestamp_col}'. Fix the data before splitting."
+        )
+    work[timestamp_col] = parsed_ts
+
+    protected_ids = build_protected_row_ids(work, user_col, item_col, timestamp_col)
+    cols_out = df.columns.tolist()
+
+    holdout_ids: list[int] = []
+    n_users_with_holdout = 0
+    n_users_single_interaction = 0
+    n_users_limited_by_protected = 0
+    desired_list: list[int] = []
+    actual_list: list[int] = []
+
+    for _, user_df in work.groupby(user_col, sort=False):
+        user_sorted = user_df.sort_values(
+            [timestamp_col, "__row_id"], kind="stable"
+        )
+        row_ids = user_sorted["__row_id"].tolist()
+        n_u = len(row_ids)
+
+        if n_u == 1:
+            # Single-interaction users: desired = min(ceil(1*size), 0) = 0
+            n_users_single_interaction += 1
+            desired_list.append(0)
+            actual_list.append(0)
+            continue
+
+        desired = min(math.ceil(n_u * holdout_size), n_u - 1)
+        desired_list.append(desired)
+
+        # Find last protected interaction in sorted order (scan from end)
+        last_protected_pos = -1
+        for i in range(n_u - 1, -1, -1):
+            if row_ids[i] in protected_ids:
+                last_protected_pos = i
+                break
+
+        # window = contiguous suffix after the last protected row
+        window = row_ids[last_protected_pos + 1:]
+        actual = min(desired, len(window))
+        actual_list.append(actual)
+
+        if actual < desired:
+            # Protected suffix blocked some or all of the quota — valid outcome
+            n_users_limited_by_protected += 1
+
+        if actual > 0:
+            holdout_ids.extend(window[-actual:])
+            n_users_with_holdout += 1
+
+    total_desired = sum(desired_list)
+    total_actual  = sum(actual_list)
+    shortfall     = total_desired - total_actual
+    n_users_total = len(desired_list)
+    n_users_without_holdout = n_users_total - n_users_with_holdout
+
+    holdout_id_set = set(holdout_ids)
+    holdout_mask   = work["__row_id"].isin(holdout_id_set)
+    remainder_df   = work.loc[~holdout_mask, cols_out].reset_index(drop=True)
+    holdout_df     = work.loc[holdout_mask,  cols_out].reset_index(drop=True)
+
+    actual_overall_ratio = len(holdout_df) / len(df) if len(df) > 0 else 0.0
+
+    # ── Diagnostics ───────────────────────────────────────────────────────────
+    desired_arr = np.array(desired_list)
+    actual_arr  = np.array(actual_list)
+    nonzero_desired = desired_arr[desired_arr > 0]
+    nonzero_actual  = actual_arr[actual_arr > 0]
+
+    print(
+        f"  [{split_name}] "
+        f"users={n_users_total:,} | "
+        f"users_with_holdout={n_users_with_holdout:,} | "
+        f"users_without_holdout={n_users_without_holdout:,} | "
+        f"users_single_interaction={n_users_single_interaction:,} | "
+        f"users_limited_by_protected={n_users_limited_by_protected:,}"
+    )
+    print(
+        f"  [{split_name}] "
+        f"desired_sum={total_desired:,} | "
+        f"actual_sum={total_actual:,} | "
+        f"shortfall={shortfall:,} | "
+        f"actual_overall_ratio={actual_overall_ratio:.4f}"
+    )
+    if len(nonzero_desired) > 0:
+        print(
+            f"  [{split_name}] desired per user (nonzero): "
+            f"min={int(nonzero_desired.min())} "
+            f"median={int(np.median(nonzero_desired))} "
+            f"max={int(nonzero_desired.max())}"
+        )
+    if len(nonzero_actual) > 0:
+        print(
+            f"  [{split_name}] actual  per user (nonzero): "
+            f"min={int(nonzero_actual.min())} "
+            f"median={int(np.median(nonzero_actual))} "
+            f"max={int(nonzero_actual.max())}"
+        )
+
+    # ── Assertions ────────────────────────────────────────────────────────────
+    assert len(remainder_df) + len(holdout_df) == len(df), (
+        f"BUG [{split_name}]: row count mismatch — "
+        f"remainder={len(remainder_df)} + holdout={len(holdout_df)} "
+        f"!= input={len(df)}"
+    )
+    remainder_row_ids = set(work.loc[~holdout_mask, "__row_id"])
+    assert holdout_id_set.isdisjoint(remainder_row_ids), (
+        f"BUG [{split_name}]: overlap between remainder and holdout row IDs"
+    )
+    missing_u = set(df[user_col]) - set(remainder_df[user_col])
+    assert not missing_u, (
+        f"BUG [{split_name}]: remainder missing users: {missing_u}"
+    )
+    missing_i = set(df[item_col]) - set(remainder_df[item_col])
+    assert not missing_i, (
+        f"BUG [{split_name}]: remainder missing items: {missing_i}"
+    )
+    if len(holdout_df) > 0:
+        extra_u = set(holdout_df[user_col]) - set(remainder_df[user_col])
+        assert not extra_u, (
+            f"BUG [{split_name}]: holdout has users not in remainder: {extra_u}"
+        )
+        extra_i = set(holdout_df[item_col]) - set(remainder_df[item_col])
+        assert not extra_i, (
+            f"BUG [{split_name}]: holdout has items not in remainder: {extra_i}"
+        )
+        h_min = holdout_df.groupby(user_col)[timestamp_col].min()
+        r_max = remainder_df.groupby(user_col)[timestamp_col].max()
+        for u, min_h in h_min.items():
+            max_r = r_max.get(u)
+            if max_r is not None:
+                assert max_r <= min_h, (
+                    f"BUG [{split_name}]: temporal violation for user {u}: "
+                    f"max(remainder)={max_r} > min(holdout)={min_h}"
+                )
+        input_counts = work.groupby(user_col, sort=False).size()
+        holdout_counts = (
+            holdout_df.groupby(user_col).size()
+            .reindex(input_counts.index, fill_value=0)
+        )
+        desired_counts = np.minimum(
+            np.ceil(input_counts * holdout_size).astype(int),
+            (input_counts - 1).clip(lower=0),
+        )
+        violations = holdout_counts[holdout_counts > desired_counts]
+        assert violations.empty, (
+            f"BUG [{split_name}]: holdout quota exceeded for users: "
+            f"{violations.to_dict()}"
+        )
+
+    return remainder_df, holdout_df
+
+
 def temporal_global_holdout_with_coverage(
     df: pd.DataFrame,
     user_col: str,
@@ -17,6 +213,16 @@ def temporal_global_holdout_with_coverage(
     split_name: str = "holdout",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
+    DEPRECATED — not used by the current preprocessing pipeline.
+
+    The current pipeline uses userwise_temporal_holdout_with_coverage() instead,
+    which applies per-user ceil() quotas and no global row target.  This function
+    uses a global target (round(N * holdout_size)) and a max-heap to enforce it;
+    behaviour differs substantially from the per-user rule.  Kept for reference
+    and backward compatibility only.
+
+    Original docstring below.
+    --------------------------
     Global temporal holdout split with coverage protection.
 
     Selects  target = round(len(df) * holdout_size)  rows for holdout using a
@@ -216,6 +422,11 @@ def userwise_temporal_split(
     min_test_interactions: int = 1,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
+    DEPRECATED — not used by the current preprocessing pipeline.
+
+    Does not enforce user+item coverage in the remainder; use
+    userwise_temporal_holdout_with_coverage() instead.
+
     Chia train/test theo từng user dựa trên timestamp.
 
     Với mỗi user:
@@ -287,6 +498,12 @@ def split_train_valid_preserve_items(
     valid_ratio: float = 0.1,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
+    DEPRECATED — not used by the current preprocessing pipeline.
+
+    Uses a global validation target distributed via Largest Remainder Method.
+    The current pipeline uses userwise_temporal_holdout_with_coverage() with
+    per-user ceil() quotas and no global target.  Kept for reference only.
+
     Split df into train/valid with three guarantees:
       1. train contains every user and every item from df
       2. valid users/items are a subset of train
@@ -442,7 +659,7 @@ def split_train_valid_from_train_pool(
     timestamp_col: str,
     valid_size: float = 0.1,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Backward-compatible wrapper around userwise_temporal_split."""
+    """DEPRECATED — wrapper around the deprecated userwise_temporal_split."""
     return userwise_temporal_split(
         df=train_pool,
         user_col=user_col,

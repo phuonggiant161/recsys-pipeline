@@ -44,7 +44,7 @@ from elliot.evaluation.metrics.fairness.rsp import RSP
 from elliot.evaluation.metrics.fairness.reo import REO
 
 from elliot.evaluation.metrics.statistical_array_metric import StatisticalMetric
-from elliot.evaluation.metrics.accuracy.user_group.user_group_metric import make_u1_metric
+from elliot.evaluation.metrics.accuracy.user_group.user_group_metric import make_tail_metric, make_u1_metric
 
 _metric_dictionary = {
     "nDCG": nDCG,
@@ -96,6 +96,8 @@ _metric_dictionary = {
     "nDCG_u1": make_u1_metric(nDCG),
     "MAP_u1": make_u1_metric(MAP),
     "MRR_u1": make_u1_metric(MRR),
+    "Recall_tail": make_tail_metric(Recall),
+    "nDCG_tail": make_tail_metric(nDCG),
 }
 
 _lower_dict = {k.lower(): v for k, v in _metric_dictionary.items()}

@@ -41,6 +41,7 @@ except ImportError as exc:
 _MODEL_TO_YAML: dict[str, Path] = {
     "BPR":     _PROJECT_ROOT / "configs" / "recbole" / "bpr.yml",
     "ItemKNN": _PROJECT_ROOT / "configs" / "recbole" / "itemknn.yml",
+    "NeuMF":   _PROJECT_ROOT / "configs" / "recbole" / "neumf.yml",
 }
 _ALL_MODELS = list(_MODEL_TO_YAML.keys())
 
@@ -206,31 +207,31 @@ def _run_one(dataset: str, model_name: str, overwrite: bool) -> str:
 # ---------------------------------------------------------------------------
 
 def main():
+    valid_names = " | ".join(_ALL_MODELS)
     p = argparse.ArgumentParser(
-        description="Run RecBole experiments (BPR / ItemKNN) and save metrics TSV"
+        description=f"Run RecBole experiments ({valid_names}) and save metrics TSV"
     )
     group = p.add_mutually_exclusive_group(required=True)
     group.add_argument("--dataset", help="Dataset name (must exist in data/recbole/)")
     group.add_argument("--all",     action="store_true",
                        help="Run on all valid datasets in data/recbole/")
     p.add_argument("--model",    required=True,
-                   help="Model to run: BPR | ItemKNN | all")
+                   help=f"Model to run: {valid_names} | all")
     p.add_argument("--filter",   help="(with --all) only datasets whose name contains this substring")
     p.add_argument("--overwrite", action="store_true",
                    help="Overwrite existing TSV output (checked per dataset×model)")
     args = p.parse_args()
 
-    # Resolve model list
+    # Resolve model list — case-insensitive lookup
     model_arg = args.model.strip().lower()
+    _name_map = {k.lower(): k for k in _ALL_MODELS}
     if model_arg == "all":
         models = _ALL_MODELS
-    elif model_arg == "bpr":
-        models = ["BPR"]
-    elif model_arg == "itemknn":
-        models = ["ItemKNN"]
+    elif model_arg in _name_map:
+        models = [_name_map[model_arg]]
     else:
         raise SystemExit(
-            f"ERROR: --model must be one of: BPR, ItemKNN, all. Got: {args.model!r}"
+            f"ERROR: --model must be one of: {valid_names}, all. Got: {args.model!r}"
         )
 
     # Validate YAML files exist

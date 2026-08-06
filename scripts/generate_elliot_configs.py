@@ -12,8 +12,9 @@ Path resolution trong Elliot (quan trọng):
 Cách dùng:
     python scripts/generate_elliot_configs.py --model ItemKNN
     python scripts/generate_elliot_configs.py --model VSM
-    python scripts/generate_elliot_configs.py --model ItemKNN VSM
-    python scripts/generate_elliot_configs.py --model VSM --filter hm_random --overwrite
+    python scripts/generate_elliot_configs.py --model FunkSVD
+    python scripts/generate_elliot_configs.py --model ItemKNN VSM FunkSVD
+    python scripts/generate_elliot_configs.py --model FunkSVD --filter hm_random --overwrite
 """
 import argparse
 from pathlib import Path
@@ -131,12 +132,44 @@ VSM = _Model(
 )
 
 
+# ── FunkSVD ───────────────────────────────────────────────────────────────────
+
+def _funksvd_models_yaml(_: str) -> str:
+    return """\
+    FunkSVD:
+      meta:
+        save_recs: True
+        validation_metric: nDCG@10
+        validation_rate: 1
+      epochs: 100
+      batch_size: 512
+      factors: 64
+      lr: 0.0001
+      reg_w: 0.1
+      reg_b: 0.001
+      early_stopping:
+        monitor: nDCG@10
+        mode: max
+        patience: 10
+        min_delta: 0.0001
+        verbose: True"""
+
+
+FUNKSVD = _Model(
+    suffix="funksvd",
+    models_yaml=_funksvd_models_yaml,
+    data_config_extra=lambda _: "",
+    preflight=lambda _: None,
+)
+
+
 # ── Registry ──────────────────────────────────────────────────────────────────
 # Keys are lowercase; --model flag is matched case-insensitively.
 
 MODELS: dict[str, _Model] = {
     "itemknn": ITEMKNN,
     "vsm":     VSM,
+    "funksvd": FUNKSVD,
 }
 
 

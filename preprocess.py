@@ -1,16 +1,13 @@
 import argparse
 from pathlib import Path
+import numpy as np
 import pandas as pd
 
 from src.config import get_dataset_config
 from src.io_utils import load_dataframe
 from src.kcore import make_k_core
 from src.dedup import deduplicate_user_item
-from src.splitting import (
-    temporal_global_holdout_with_coverage,
-    userwise_temporal_split,          # kept for backward compat
-    split_train_valid_preserve_items, # kept for backward compat
-)
+from src.splitting import userwise_temporal_holdout_with_coverage
 from src.thinning import (
     generate_random_thinning_levels,
     generate_head_item_cut_levels,
@@ -23,28 +20,38 @@ from src.dataset_folder import (
 )
 
 # ── Default constants (edit here, or override via CLI args) ──────────────────
-# DATASET_NAME   = "amazon"   # "hm"
-# K_USER         = 15              # min interactions per user
-# K_ITEM         = 12         # min interactions per item
-# TEST_SIZE       = 0.1                           # pool → test
-# VALID_SIZE      = 0.1
-# KEEP_FRACS     = [0.9, 0.7, 0.5, 0.3, 0.1]
-# HEAD_KEEP_FRACS = [0.1]
-# TAIL_KEEP_FRACS = [0.1]
-# SEED           = 42
-# DEDUP_USER_ITEM = True            # True → keep last interaction per user-item pair
-
-# # ── H&M preset ────────────────────────────────────────
-DATASET_NAME    = "hm"
-K_USER          = 35
-K_ITEM          = 25
+DATASET_NAME   = "amazon"   # "hm"
+K_USER         = 15              # min interactions per user
+K_ITEM         = 12         # min interactions per item
 TEST_SIZE       = 0.1                           # pool → test
-VALID_SIZE      = 0.1                           # train_pool → valid
-KEEP_FRACS      = [0.9, 0.7, 0.5, 0.1, 0.05]   # random thinning levels
+VALID_SIZE      = 0.1
+KEEP_FRACS     = [0.9, 0.7, 0.5, 0.3, 0.1]
 HEAD_KEEP_FRACS = [0.1]
 TAIL_KEEP_FRACS = [0.1]
-SEED            = 42
-DEDUP_USER_ITEM = True
+SEED           = 42
+DEDUP_USER_ITEM = True            # True → keep last interaction per user-item pair
+
+# # ── H&M preset ────────────────────────────────────────
+# DATASET_NAME    = "hm"
+# K_USER          = 35
+# K_ITEM          = 25
+# TEST_SIZE       = 0.1                           # pool → test
+# VALID_SIZE      = 0.1                           # train_pool → valid
+# KEEP_FRACS      = [0.9, 0.7, 0.5, 0.1, 0.05]   # random thinning levels
+# HEAD_KEEP_FRACS = [0.1]
+# TAIL_KEEP_FRACS = [0.1]
+# SEED            = 42
+# DEDUP_USER_ITEM = True
+
+
+def _desired_holdout_sum(df: pd.DataFrame, user_col: str, holdout_size: float) -> int:
+    """Sum of per-user desired holdout quotas: sum(min(ceil(n_u * size), n_u-1))."""
+    sizes = df.groupby(user_col).size()
+    desired = np.minimum(
+        np.ceil(sizes * holdout_size).astype(int),
+        (sizes - 1).clip(lower=0),
+    )
+    return int(desired.sum())
 
 
 def parse_args():
@@ -153,16 +160,29 @@ def _verify_split(
         if n > 0:
             print(f"  [WARN][{label}] {pair} overlap: {n:,} (user,item) pairs")
 
-    # 5. Valid ratio (warn if >0.1% off)
-    total_tv = len(train) + len(valid)
-    actual_ratio = len(valid) / total_tv if total_tv > 0 else 0
-    ratio_diff = actual_ratio - valid_ratio
-    ratio_ok = abs(ratio_diff) <= 0.001
-    if not ratio_ok:
+    # 5. Per-user quota check (replaces global ratio check)
+    #    valid_count_u <= min(ceil(n_u * valid_ratio), n_u - 1) for every user
+    input_counts = thinned_pool.groupby(user_col).size()
+    valid_counts = (
+        valid.groupby(user_col).size()
+        .reindex(input_counts.index, fill_value=0)
+    )
+    desired_counts = np.minimum(
+        np.ceil(input_counts * valid_ratio).astype(int),
+        (input_counts - 1).clip(lower=0),
+    )
+    violations = valid_counts[valid_counts > desired_counts]
+    quota_ok = violations.empty
+    if not quota_ok:
         print(
-            f"  [WARN][{label}] valid_ratio={actual_ratio:.4f} "
-            f"(target={valid_ratio:.3f}, diff={ratio_diff:+.4f})"
+            f"  [WARN][{label}] per-user quota exceeded for "
+            f"{len(violations):,} users: {violations.to_dict()}"
         )
+
+    desired_valid_sum = int(desired_counts.sum())
+    actual_valid_rows = len(valid)
+    valid_shortfall   = desired_valid_sum - actual_valid_rows
+    actual_valid_ratio = actual_valid_rows / len(thinned_pool) if len(thinned_pool) > 0 else 0.0
 
     # 6. Test hash
     test_hash = _dataframe_hash(test, hash_cols)
@@ -174,22 +194,24 @@ def _verify_split(
         )
 
     report_rows.append({
-        "config":         label,
-        "thinned_pool":   len(thinned_pool),
-        "train":          len(train),
-        "valid":          len(valid),
-        "valid_ratio":    f"{actual_ratio:.4f}",
-        "ratio_ok":       "OK" if ratio_ok else "WARN",
-        "test":           len(test),
-        "test_hash_ok":   "OK" if hash_ok else "FAIL",
-        "user_cov":       "OK" if user_cov_ok else "FAIL",
-        "item_cov":       "OK" if item_cov_ok else "FAIL",
-        "train_dups":     train_dups,
-        "valid_dups":     valid_dups,
-        "test_dups":      test_dups,
-        "tv_overlap":     tv_overlap,
-        "tt_overlap":     tt_overlap,
-        "vt_overlap":     vt_overlap,
+        "config":             label,
+        "thinned_pool":       len(thinned_pool),
+        "train":              len(train),
+        "valid":              actual_valid_rows,
+        "actual_valid_ratio": f"{actual_valid_ratio:.4f}",
+        "desired_valid_sum":  desired_valid_sum,
+        "valid_shortfall":    valid_shortfall,
+        "quota_ok":           "OK" if quota_ok else "WARN",
+        "test":               len(test),
+        "test_hash_ok":       "OK" if hash_ok else "FAIL",
+        "user_cov":           "OK" if user_cov_ok else "FAIL",
+        "item_cov":           "OK" if item_cov_ok else "FAIL",
+        "train_dups":         train_dups,
+        "valid_dups":         valid_dups,
+        "test_dups":          test_dups,
+        "tv_overlap":         tv_overlap,
+        "tt_overlap":         tt_overlap,
+        "vt_overlap":         vt_overlap,
     })
 
 
@@ -242,7 +264,7 @@ def _make_thinning_metadata(
     dataset_name, method, base_output, preprocessing_method,
     user_col, item_col, timestamp_col, k_user, k_item,
     keep_frac, reference_stats, train_metrics, test_base,
-    target_test_rows, target_valid_rows, thin_train, thin_valid,
+    desired_test_rows_sum, desired_valid_rows_sum, thin_train, thin_valid,
 ):
     return {
         "dataset_name": dataset_name,
@@ -256,21 +278,27 @@ def _make_thinning_metadata(
         "k_item": k_item,
         "test_size": TEST_SIZE,
         "valid_size_from_train_pool": VALID_SIZE,
-        "split_method": "temporal_global_holdout_with_coverage",
-        "split_ratio_type": "global_rows_not_per_user",
-        "test_policy": "fixed_global_temporal_holdout_from_kcore",
-        "valid_policy": "per_thinned_train_pool_global_temporal_holdout_with_coverage",
-        "protected_policy_stage1": "protect_user_item_before_thinning",
-        "protected_policy_stage2": "protect_user_item_via_greedy_coverage_check",
+        "split_method": "userwise_temporal_holdout_with_coverage",
+        "split_ratio_type": "per_user_ceil",
+        "holdout_selection": "latest_temporal_suffix_per_user",
+        "global_target_enforced": False,
+        "shortfall_redistribution": False,
+        "test_protection_policy": "recompute_protected_rows_before_test_split",
+        "thinning_protection_policy": "protect_user_item_before_thinning",
+        "valid_protection_policy": "recompute_protected_rows_before_valid_split",
+        "protected_row_definition": "first_interaction_per_user_plus_first_interaction_per_uncovered_item",
+        "holdout_window": "contiguous_suffix_after_last_protected_interaction_per_user",
         "dedup_user_item": DEDUP_USER_ITEM,
         "dedup_keep": "last" if DEDUP_USER_ITEM else None,
         "keep_frac": keep_frac,
         "reference_stats": reference_stats,
         "train_metrics": train_metrics,
-        "target_test_rows": int(target_test_rows),
+        "desired_test_rows_sum": int(desired_test_rows_sum),
         "actual_test_rows": int(len(test_base)),
-        "target_valid_rows": int(target_valid_rows),
+        "test_shortfall": int(desired_test_rows_sum - len(test_base)),
+        "desired_valid_rows_sum": int(desired_valid_rows_sum),
         "actual_valid_rows": int(len(thin_valid)),
+        "valid_shortfall": int(desired_valid_rows_sum - len(thin_valid)),
         "train_users": int(thin_train[user_col].nunique()),
         "train_items": int(thin_train[item_col].nunique()),
         "valid_users": int(thin_valid[user_col].nunique()),
@@ -370,12 +398,12 @@ def main():
     )
 
     # ── Step 4: dense_df → train_pool_base / test_base ──────────────────────
-    target_test_rows = round(len(dense_df) * TEST_SIZE)
+    desired_test_rows_sum = _desired_holdout_sum(dense_df, user_col, TEST_SIZE)
     print(
-        f"Step 4: Global temporal holdout -> train_pool / test  "
-        f"(test_size={TEST_SIZE}, target={target_test_rows:,})"
+        f"Step 4: Per-user temporal holdout -> train_pool / test  "
+        f"(test_size={TEST_SIZE}, desired_per_user_sum={desired_test_rows_sum:,})"
     )
-    train_pool_base, test_base = temporal_global_holdout_with_coverage(
+    train_pool_base, test_base = userwise_temporal_holdout_with_coverage(
         df=dense_df,
         user_col=user_col,
         item_col=item_col,
@@ -385,7 +413,11 @@ def main():
     )
     _log_df("train_pool_base", train_pool_base, user_col, item_col)
     _log_df("test_base      ", test_base,       user_col, item_col)
-    print(f"  actual_test_rows={len(test_base):,}  target={target_test_rows:,}")
+    print(
+        f"  actual_test_rows={len(test_base):,} | "
+        f"desired_sum={desired_test_rows_sum:,} | "
+        f"shortfall={desired_test_rows_sum - len(test_base):,}"
+    )
     _assert_split("step4_test", dense_df, train_pool_base, test_base, user_col, item_col)
 
     # Compute test hash once — all configurations must produce the same test set
@@ -395,12 +427,12 @@ def main():
     split_report_rows: list[dict] = []
 
     # ── Step 4b: train_pool_base → train_base / valid_base ──────────────────
-    target_valid_base = round(len(train_pool_base) * VALID_SIZE)
+    desired_valid_base_sum = _desired_holdout_sum(train_pool_base, user_col, VALID_SIZE)
     print(
-        f"Step 4b: Global temporal holdout -> train / valid  "
-        f"(valid_size={VALID_SIZE}, target={target_valid_base:,})"
+        f"Step 4b: Per-user temporal holdout -> train / valid  "
+        f"(valid_size={VALID_SIZE}, desired_per_user_sum={desired_valid_base_sum:,})"
     )
-    train_base, valid_base = temporal_global_holdout_with_coverage(
+    train_base, valid_base = userwise_temporal_holdout_with_coverage(
         df=train_pool_base,
         user_col=user_col,
         item_col=item_col,
@@ -443,7 +475,7 @@ def main():
     base_output = output_root / f"{dataset_name}_{version_name}_base_split"
     base_metadata = {
         "dataset_name": dataset_name,
-        "method": "temporal_global_holdout_with_coverage",
+        "method": "userwise_temporal_holdout_with_coverage",
         "parent_dataset": str(dense_output),
         "preprocessing_method": preprocessing_method,
         "user_col": user_col,
@@ -453,20 +485,26 @@ def main():
         "k_item": k_item,
         "test_size": TEST_SIZE,
         "valid_size_from_train_pool": VALID_SIZE,
-        "split_method": "temporal_global_holdout_with_coverage",
-        "split_ratio_type": "global_rows_not_per_user",
-        "test_policy": "fixed_global_temporal_holdout_from_kcore",
-        "valid_policy": "per_thinned_train_pool_global_temporal_holdout_with_coverage",
-        "protected_policy_stage1": "protect_user_item_before_thinning",
-        "protected_policy_stage2": "protect_user_item_via_greedy_coverage_check",
+        "split_method": "userwise_temporal_holdout_with_coverage",
+        "split_ratio_type": "per_user_ceil",
+        "holdout_selection": "latest_temporal_suffix_per_user",
+        "global_target_enforced": False,
+        "shortfall_redistribution": False,
+        "test_protection_policy": "recompute_protected_rows_before_test_split",
+        "thinning_protection_policy": "protect_user_item_before_thinning",
+        "valid_protection_policy": "recompute_protected_rows_before_valid_split",
+        "protected_row_definition": "first_interaction_per_user_plus_first_interaction_per_uncovered_item",
+        "holdout_window": "contiguous_suffix_after_last_protected_interaction_per_user",
         "dedup_user_item": DEDUP_USER_ITEM,
         "dedup_keep": "last" if DEDUP_USER_ITEM else None,
         "reference_stats": reference_stats,
         "train_metrics": train_base_metrics,
-        "target_test_rows": int(target_test_rows),
+        "desired_test_rows_sum": int(desired_test_rows_sum),
         "actual_test_rows": int(len(test_base)),
-        "target_valid_rows": int(target_valid_base),
+        "test_shortfall": int(desired_test_rows_sum - len(test_base)),
+        "desired_valid_rows_sum": int(desired_valid_base_sum),
         "actual_valid_rows": int(len(valid_base)),
+        "valid_shortfall": int(desired_valid_base_sum - len(valid_base)),
         "train_users": int(train_base[user_col].nunique()),
         "train_items": int(train_base[item_col].nunique()),
         "valid_users": int(valid_base[user_col].nunique()),
@@ -501,8 +539,8 @@ def main():
 
     for level_name, thin_train_pool in random_pool_outputs.items():
         _log_df(f"  random {level_name} thin_train_pool", thin_train_pool, user_col, item_col)
-        target_valid_rows = round(len(thin_train_pool) * VALID_SIZE)
-        thin_train, thin_valid = temporal_global_holdout_with_coverage(
+        desired_valid_rows_sum = _desired_holdout_sum(thin_train_pool, user_col, VALID_SIZE)
+        thin_train, thin_valid = userwise_temporal_holdout_with_coverage(
             df=thin_train_pool,
             user_col=user_col,
             item_col=item_col,
@@ -529,7 +567,8 @@ def main():
             user_col=user_col, item_col=item_col, timestamp_col=timestamp_col,
             k_user=k_user, k_item=k_item, keep_frac=keep_frac,
             reference_stats=reference_stats, train_metrics=thin_metrics, test_base=test_base,
-            target_test_rows=target_test_rows, target_valid_rows=target_valid_rows,
+            desired_test_rows_sum=desired_test_rows_sum,
+            desired_valid_rows_sum=desired_valid_rows_sum,
             thin_train=thin_train, thin_valid=thin_valid,
         )
         save_train_valid_test_folder(
@@ -554,8 +593,8 @@ def main():
 
     for level_name, thin_train_pool in head_pool_outputs.items():
         _log_df(f"  head {level_name} thin_train_pool", thin_train_pool, user_col, item_col)
-        target_valid_rows = round(len(thin_train_pool) * VALID_SIZE)
-        thin_train, thin_valid = temporal_global_holdout_with_coverage(
+        desired_valid_rows_sum = _desired_holdout_sum(thin_train_pool, user_col, VALID_SIZE)
+        thin_train, thin_valid = userwise_temporal_holdout_with_coverage(
             df=thin_train_pool,
             user_col=user_col,
             item_col=item_col,
@@ -582,7 +621,8 @@ def main():
             user_col=user_col, item_col=item_col, timestamp_col=timestamp_col,
             k_user=k_user, k_item=k_item, keep_frac=keep_frac,
             reference_stats=reference_stats, train_metrics=thin_metrics, test_base=test_base,
-            target_test_rows=target_test_rows, target_valid_rows=target_valid_rows,
+            desired_test_rows_sum=desired_test_rows_sum,
+            desired_valid_rows_sum=desired_valid_rows_sum,
             thin_train=thin_train, thin_valid=thin_valid,
         )
         save_train_valid_test_folder(
@@ -607,8 +647,8 @@ def main():
 
     for level_name, thin_train_pool in tail_pool_outputs.items():
         _log_df(f"  tail {level_name} thin_train_pool", thin_train_pool, user_col, item_col)
-        target_valid_rows = round(len(thin_train_pool) * VALID_SIZE)
-        thin_train, thin_valid = temporal_global_holdout_with_coverage(
+        desired_valid_rows_sum = _desired_holdout_sum(thin_train_pool, user_col, VALID_SIZE)
+        thin_train, thin_valid = userwise_temporal_holdout_with_coverage(
             df=thin_train_pool,
             user_col=user_col,
             item_col=item_col,
@@ -635,7 +675,8 @@ def main():
             user_col=user_col, item_col=item_col, timestamp_col=timestamp_col,
             k_user=k_user, k_item=k_item, keep_frac=keep_frac,
             reference_stats=reference_stats, train_metrics=thin_metrics, test_base=test_base,
-            target_test_rows=target_test_rows, target_valid_rows=target_valid_rows,
+            desired_test_rows_sum=desired_test_rows_sum,
+            desired_valid_rows_sum=desired_valid_rows_sum,
             thin_train=thin_train, thin_valid=thin_valid,
         )
         save_train_valid_test_folder(
@@ -659,7 +700,8 @@ def main():
 
     print("\n-- Split verification report -------------------------------------------")
     report_df = pd.DataFrame(split_report_rows, columns=[
-        "config", "thinned_pool", "train", "valid", "valid_ratio", "ratio_ok",
+        "config", "thinned_pool", "train", "valid",
+        "actual_valid_ratio", "desired_valid_sum", "valid_shortfall", "quota_ok",
         "test", "test_hash_ok", "user_cov", "item_cov",
         "train_dups", "valid_dups", "test_dups",
         "tv_overlap", "tt_overlap", "vt_overlap",
