@@ -87,7 +87,7 @@ class MRR(TopkMetric):
 
     def metric_info(self, pos_index):
         idxs = pos_index.argmax(axis=1)
-        result = np.zeros_like(pos_index, dtype=np.float)
+        result = np.zeros_like(pos_index, dtype=float)
         for row, idx in enumerate(idxs):
             if pos_index[row, idx] > 0:
                 result[row, idx:] = 1 / (idx + 1)
@@ -125,10 +125,10 @@ class MAP(TopkMetric):
 
     def metric_info(self, pos_index, pos_len):
         pre = pos_index.cumsum(axis=1) / np.arange(1, pos_index.shape[1] + 1)
-        sum_pre = np.cumsum(pre * pos_index.astype(np.float), axis=1)
+        sum_pre = np.cumsum(pre * pos_index.astype(float), axis=1)
         len_rank = np.full_like(pos_len, pos_index.shape[1])
         actual_len = np.where(pos_len > len_rank, len_rank, pos_len)
-        result = np.zeros_like(pos_index, dtype=np.float)
+        result = np.zeros_like(pos_index, dtype=float)
         for row, lens in enumerate(actual_len):
             ranges = np.arange(1, pos_index.shape[1] + 1)
             ranges[lens:] = ranges[lens - 1]
@@ -187,13 +187,13 @@ class NDCG(TopkMetric):
         len_rank = np.full_like(pos_len, pos_index.shape[1])
         idcg_len = np.where(pos_len > len_rank, len_rank, pos_len)
 
-        iranks = np.zeros_like(pos_index, dtype=np.float)
+        iranks = np.zeros_like(pos_index, dtype=float)
         iranks[:, :] = np.arange(1, pos_index.shape[1] + 1)
         idcg = np.cumsum(1.0 / np.log2(iranks + 1), axis=1)
         for row, idx in enumerate(idcg_len):
             idcg[row, idx:] = idcg[row, idx - 1]
 
-        ranks = np.zeros_like(pos_index, dtype=np.float)
+        ranks = np.zeros_like(pos_index, dtype=float)
         ranks[:, :] = np.arange(1, pos_index.shape[1] + 1)
         dcg = 1.0 / np.log2(ranks + 1)
         dcg = np.cumsum(np.where(pos_index, dcg, 0), axis=1)
@@ -884,6 +884,189 @@ class U1MRR(TopkMetric):
 
     def metric_info(self, pos_index):
         return MRR.metric_info(self, pos_index)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Item-popularity group metrics
+# Bins are fixed: pop1 (=1), pop2_5 (2-5), pop6_10 (6-10), pop11_20 (11-20),
+# pop20plus (>20).  Popularity = train interaction count.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_POP_GROUP_KEYS = ["pop1", "pop2_5", "pop6_10", "pop11_20", "pop20plus"]
+
+
+def _pop_filter(dataobject, group_name):
+    """Return (pos_index, pos_len) for users with ≥1 GT item in the group."""
+    mat = dataobject.get(f"rec.topk_{group_name}").numpy()
+    pos_index = mat[:, :-1].astype(bool)
+    pos_len   = mat[:, -1]
+    mask = pos_len > 0
+    return pos_index[mask], pos_len[mask]
+
+
+def _pop_topk_result(metric_name, value, topk, decimal_place):
+    """Like topk_result but returns NaN when no eligible users exist.
+
+    NaN distinguishes "group has no eligible users" from "group has users but 0 hits".
+    """
+    if len(value) == 0:
+        return {f"{metric_name}@{k}": float("nan") for k in topk}
+    avg = value.mean(axis=0)
+    return {f"{metric_name}@{k}": round(float(avg[k - 1]), decimal_place) for k in topk}
+
+
+def _make_pop_recall(group_name):
+    rkey = f"rec.topk_{group_name}"
+
+    class _Cls(TopkMetric):
+        metric_need = ["data.count_items", "data.pop_groups", rkey]
+
+        def calculate_metric(self, dataobject):
+            pos_index, pos_len = _pop_filter(dataobject, group_name)
+            pop_groups = dataobject.get("data.pop_groups")
+            n_train_items = len(pop_groups[group_name])
+            n_test_users = len(pos_len)
+            n_test_interactions = int(pos_len.sum()) if n_test_users > 0 else 0
+            print(
+                f"  [pop_stats] {group_name}: train_items={n_train_items}"
+                f"  test_users={n_test_users}  test_interactions={n_test_interactions}"
+            )
+            result = Recall.metric_info(self, pos_index, pos_len)
+            return _pop_topk_result(f"recall_{group_name}", result, self.topk, self.decimal_place)
+
+        def metric_info(self, pos_index, pos_len):
+            return Recall.metric_info(self, pos_index, pos_len)
+
+    _Cls.__name__ = f"PopRecall_{group_name}"
+    _Cls.__qualname__ = f"PopRecall_{group_name}"
+    return _Cls
+
+
+def _make_pop_ndcg(group_name):
+    rkey = f"rec.topk_{group_name}"
+
+    class _Cls(TopkMetric):
+        metric_need = ["data.count_items", "data.pop_groups", rkey]
+
+        def calculate_metric(self, dataobject):
+            pos_index, pos_len = _pop_filter(dataobject, group_name)
+            result = NDCG.metric_info(self, pos_index, pos_len)
+            return _pop_topk_result(f"ndcg_{group_name}", result, self.topk, self.decimal_place)
+
+        def metric_info(self, pos_index, pos_len):
+            return NDCG.metric_info(self, pos_index, pos_len)
+
+    _Cls.__name__ = f"PopNDCG_{group_name}"
+    _Cls.__qualname__ = f"PopNDCG_{group_name}"
+    return _Cls
+
+
+PopRecall_pop1      = _make_pop_recall("pop1")
+PopRecall_pop2_5    = _make_pop_recall("pop2_5")
+PopRecall_pop6_10   = _make_pop_recall("pop6_10")
+PopRecall_pop11_20  = _make_pop_recall("pop11_20")
+PopRecall_pop20plus = _make_pop_recall("pop20plus")
+
+PopNDCG_pop1        = _make_pop_ndcg("pop1")
+PopNDCG_pop2_5      = _make_pop_ndcg("pop2_5")
+PopNDCG_pop6_10     = _make_pop_ndcg("pop6_10")
+PopNDCG_pop11_20    = _make_pop_ndcg("pop11_20")
+PopNDCG_pop20plus   = _make_pop_ndcg("pop20plus")
+
+
+# =============================================================================
+# User-activity group metrics — bins based on TRAIN interaction count per user
+# u1 (==1), u2_5 (2-5), u6_10 (6-10), u11_20 (11-20), u20plus (>20)
+# Logic: filter USERS only. Full TEST GT and full Top-K are kept intact.
+# =============================================================================
+
+_USER_GROUP_BINS = [
+    ("u1",      lambda c: c == 1),
+    ("u2_5",    lambda c: 2 <= c <= 5),
+    ("u6_10",   lambda c: 6 <= c <= 10),
+    ("u11_20",  lambda c: 11 <= c <= 20),
+    ("u20plus", lambda c: c > 20),
+]
+_USER_GROUP_KEYS = ["u1", "u2_5", "u6_10", "u11_20", "u20plus"]
+
+
+def _user_group_filter(dataobject, group_name):
+    """Return (pos_index, pos_len) keeping only rows for users in group_name.
+
+    Uses rec.topk directly — no item filtering, no re-ranking.
+    pos_len is the standard TEST positive count for each user (last column of rec.topk).
+    """
+    rec_mat   = dataobject.get("rec.topk").numpy()
+    pos_index = rec_mat[:, :-1].astype(bool)
+    pos_len   = rec_mat[:, -1]
+    user_ids  = dataobject.get("data.user_ids").numpy()
+    count_map = dict(dataobject.get("data.count_users"))
+    pred      = dict(_USER_GROUP_BINS)[group_name]
+    mask      = np.array([pred(int(count_map.get(int(uid), 0))) for uid in user_ids]) & (user_ids != 0)
+    return pos_index[mask], pos_len[mask]
+
+
+def _user_group_topk_result(metric_name, value, topk, decimal_place):
+    """Returns NaN when no eligible users; avoids conflating 'empty group' with 0 score."""
+    if len(value) == 0:
+        return {f"{metric_name}@{k}": float("nan") for k in topk}
+    avg = value.mean(axis=0)
+    return {f"{metric_name}@{k}": round(float(avg[k - 1]), decimal_place) for k in topk}
+
+
+def _make_user_recall(group_name):
+    class _Cls(TopkMetric):
+        metric_need = ["rec.topk", "data.user_ids", "data.count_users"]
+
+        def calculate_metric(self, dataobject):
+            pos_index, pos_len = _user_group_filter(dataobject, group_name)
+            count_map  = dict(dataobject.get("data.count_users"))
+            user_ids   = dataobject.get("data.user_ids").numpy()
+            pred       = dict(_USER_GROUP_BINS)[group_name]
+            n_train    = sum(1 for c in count_map.values() if pred(int(c)))
+            n_eval     = int(len(pos_len))
+            n_interact = int(pos_len.sum()) if n_eval > 0 else 0
+            print(f"  [user_group_stats] {group_name}: train_users={n_train}"
+                  f"  eval_users={n_eval}  eval_interactions={n_interact}")
+            result = Recall.metric_info(self, pos_index, pos_len)
+            return _user_group_topk_result(f"recall_{group_name}", result, self.topk, self.decimal_place)
+
+        def metric_info(self, pos_index, pos_len):
+            return Recall.metric_info(self, pos_index, pos_len)
+
+    _Cls.__name__    = f"UserRecall_{group_name}"
+    _Cls.__qualname__ = f"UserRecall_{group_name}"
+    return _Cls
+
+
+def _make_user_ndcg(group_name):
+    class _Cls(TopkMetric):
+        metric_need = ["rec.topk", "data.user_ids", "data.count_users"]
+
+        def calculate_metric(self, dataobject):
+            pos_index, pos_len = _user_group_filter(dataobject, group_name)
+            result = NDCG.metric_info(self, pos_index, pos_len)
+            return _user_group_topk_result(f"ndcg_{group_name}", result, self.topk, self.decimal_place)
+
+        def metric_info(self, pos_index, pos_len):
+            return NDCG.metric_info(self, pos_index, pos_len)
+
+    _Cls.__name__    = f"UserNDCG_{group_name}"
+    _Cls.__qualname__ = f"UserNDCG_{group_name}"
+    return _Cls
+
+
+UserRecall_u1      = _make_user_recall("u1")
+UserRecall_u2_5    = _make_user_recall("u2_5")
+UserRecall_u6_10   = _make_user_recall("u6_10")
+UserRecall_u11_20  = _make_user_recall("u11_20")
+UserRecall_u20plus = _make_user_recall("u20plus")
+
+UserNDCG_u1      = _make_user_ndcg("u1")
+UserNDCG_u2_5    = _make_user_ndcg("u2_5")
+UserNDCG_u6_10   = _make_user_ndcg("u6_10")
+UserNDCG_u11_20  = _make_user_ndcg("u11_20")
+UserNDCG_u20plus = _make_user_ndcg("u20plus")
+
 
 def _tailitem_filter(dataobject):
     """Get the bool matrix indicating whether the corresponding item is positive and a tail item

@@ -44,7 +44,11 @@ from elliot.evaluation.metrics.fairness.rsp import RSP
 from elliot.evaluation.metrics.fairness.reo import REO
 
 from elliot.evaluation.metrics.statistical_array_metric import StatisticalMetric
-from elliot.evaluation.metrics.accuracy.user_group.user_group_metric import make_tail_metric, make_u1_metric
+from elliot.evaluation.metrics.accuracy.user_group.user_group_metric import (
+    make_tail_metric, make_u1_metric,
+    make_pop_recall_metric, make_pop_ndcg_metric,
+    make_user_group_metric,
+)
 
 _metric_dictionary = {
     "nDCG": nDCG,
@@ -92,12 +96,32 @@ _metric_dictionary = {
     "RSP": RSP,
     "REO": REO,
     "Precision_u1": make_u1_metric(Precision),
-    "Recall_u1": make_u1_metric(Recall),
-    "nDCG_u1": make_u1_metric(nDCG),
+    # User-activity group metrics (generalized U1: 5 bins by train interaction count)
+    "Recall_u1":      make_user_group_metric(Recall, "u1"),
+    "Recall_u2_5":    make_user_group_metric(Recall, "u2_5"),
+    "Recall_u6_10":   make_user_group_metric(Recall, "u6_10"),
+    "Recall_u11_20":  make_user_group_metric(Recall, "u11_20"),
+    "Recall_u20plus": make_user_group_metric(Recall, "u20plus"),
+    "nDCG_u1":        make_user_group_metric(nDCG, "u1"),
+    "nDCG_u2_5":      make_user_group_metric(nDCG, "u2_5"),
+    "nDCG_u6_10":     make_user_group_metric(nDCG, "u6_10"),
+    "nDCG_u11_20":    make_user_group_metric(nDCG, "u11_20"),
+    "nDCG_u20plus":   make_user_group_metric(nDCG, "u20plus"),
     "MAP_u1": make_u1_metric(MAP),
     "MRR_u1": make_u1_metric(MRR),
     "Recall_tail": make_tail_metric(Recall),
     "nDCG_tail": make_tail_metric(nDCG),
+    # Item-popularity-group metrics (fixed bins, train-count based)
+    "Recall_pop1":      make_pop_recall_metric("pop1"),
+    "Recall_pop2_5":    make_pop_recall_metric("pop2_5"),
+    "Recall_pop6_10":   make_pop_recall_metric("pop6_10"),
+    "Recall_pop11_20":  make_pop_recall_metric("pop11_20"),
+    "Recall_pop20plus": make_pop_recall_metric("pop20plus"),
+    "nDCG_pop1":        make_pop_ndcg_metric("pop1"),
+    "nDCG_pop2_5":      make_pop_ndcg_metric("pop2_5"),
+    "nDCG_pop6_10":     make_pop_ndcg_metric("pop6_10"),
+    "nDCG_pop11_20":    make_pop_ndcg_metric("pop11_20"),
+    "nDCG_pop20plus":   make_pop_ndcg_metric("pop20plus"),
 }
 
 _lower_dict = {k.lower(): v for k, v in _metric_dictionary.items()}

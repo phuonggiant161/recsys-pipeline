@@ -11,7 +11,34 @@ experiment:
 
   evaluation:
     cutoffs: [10, 20, 50]
-    simple_metrics: [Precision, Recall, nDCG, MAP, MRR, Precision_u1, Recall_u1, nDCG_u1, MAP_u1, MRR_u1]
+    simple_metrics:
+      - Precision
+      - Recall
+      - nDCG
+      - MAP
+      - MRR
+      - SEntropy
+      - Gini
+      - Recall_pop1
+      - Recall_pop2_5
+      - Recall_pop6_10
+      - Recall_pop11_20
+      - Recall_pop20plus
+      - nDCG_pop1
+      - nDCG_pop2_5
+      - nDCG_pop6_10
+      - nDCG_pop11_20
+      - nDCG_pop20plus
+      - Recall_u1
+      - Recall_u2_5
+      - Recall_u6_10
+      - Recall_u11_20
+      - Recall_u20plus
+      - nDCG_u1
+      - nDCG_u2_5
+      - nDCG_u6_10
+      - nDCG_u11_20
+      - nDCG_u20plus
 
   path_output_rec_result: ../../results/elliot/amazon_random_keep0.3/recs/
   path_output_rec_performance: ../../results/elliot/amazon_random_keep0.3/performance/

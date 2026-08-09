@@ -168,6 +168,7 @@ def run_recbole(
         "valid_score_bigger": config["valid_metric_bigger"],
         "best_valid_result": best_valid_result,
         "test_result": test_result,
+        "checkpoint_path": trainer.saved_model_file if saved else None,
     }
 
     if not config["single_spec"]:

@@ -1,0 +1,43 @@
+experiment:
+  dataset: amazon_random_keep0.3
+  data_config:
+    strategy: fixed
+    train_path: ../../../../data/processed/amazon_random_keep0.3/train.tsv
+    validation_path: ../../../../data/processed/amazon_random_keep0.3/valid.tsv
+    test_path: ../../../../data/processed/amazon_random_keep0.3/test.tsv
+  top_k: 50
+  evaluation:
+    cutoffs:
+    - 30
+    simple_metrics:
+    - SEntropy
+    - Gini
+    - Recall
+    - nDCG
+    - Recall_pop1
+    - Recall_pop2_5
+    - Recall_pop6_10
+    - Recall_pop11_20
+    - Recall_pop20plus
+    - nDCG_pop1
+    - nDCG_pop2_5
+    - nDCG_pop6_10
+    - nDCG_pop11_20
+    - nDCG_pop20plus
+    - Recall_u1
+    - Recall_u2_5
+    - Recall_u6_10
+    - Recall_u11_20
+    - Recall_u20plus
+    - nDCG_u1
+    - nDCG_u2_5
+    - nDCG_u6_10
+    - nDCG_u11_20
+    - nDCG_u20plus
+  path_output_rec_performance: results/elliot/amazon_random_keep0.3/performance/
+  path_log_folder: ../../../../results/elliot/amazon_random_keep0.3/logs/
+  gpu: 0
+  models:
+    ProxyRecommender:
+      source_model: FunkSVD
+      path: selected_artifact

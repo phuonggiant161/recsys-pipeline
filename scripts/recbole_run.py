@@ -19,10 +19,15 @@ import pandas as pd
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _RECBOLE_SRC  = _PROJECT_ROOT / "external" / "recbole"
+_SCRIPTS_DIR  = Path(__file__).resolve().parent
 
 # external/recbole must be first in sys.path to shadow any installed RecBole
 if str(_RECBOLE_SRC) not in sys.path:
     sys.path.insert(0, str(_RECBOLE_SRC))
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from selected_artifact import write_artifact, print_artifact as _print_artifact
 
 try:
     from recbole.quick_start import run_recbole
@@ -52,26 +57,63 @@ _CHECKPOINT_ROOT = _RESULTS_ROOT / "_checkpoints"
 _REQUIRED_HEADER = {"user_id:token", "item_id:token", "timestamp:float"}
 
 _BASE_METRICS = ["Precision", "Recall", "nDCG", "MAP", "MRR"]
-_U1_METRICS   = ["Precision_u1", "Recall_u1", "nDCG_u1", "MAP_u1", "MRR_u1"]
-_ALL_COLS     = ["model", "cutoff"] + _BASE_METRICS + _U1_METRICS
+_POP_METRICS  = [
+    "Recall_pop1",    "Recall_pop2_5",   "Recall_pop6_10",
+    "Recall_pop11_20","Recall_pop20plus",
+    "nDCG_pop1",      "nDCG_pop2_5",     "nDCG_pop6_10",
+    "nDCG_pop11_20",  "nDCG_pop20plus",
+]
+_USER_METRICS = [
+    "Recall_u1",    "Recall_u2_5",   "Recall_u6_10",
+    "Recall_u11_20","Recall_u20plus",
+    "nDCG_u1",      "nDCG_u2_5",     "nDCG_u6_10",
+    "nDCG_u11_20",  "nDCG_u20plus",
+]
+_ALL_COLS = ["model", "cutoff"] + _BASE_METRICS + _POP_METRICS + _USER_METRICS
 
 _METRIC_MAP = {
-    "precision":    "Precision",
-    "recall":       "Recall",
-    "ndcg":         "nDCG",
-    "map":          "MAP",
-    "mrr":          "MRR",
-    "precision_u1": "Precision_u1",
-    "recall_u1":    "Recall_u1",
-    "ndcg_u1":      "nDCG_u1",
-    "map_u1":       "MAP_u1",
-    "mrr_u1":       "MRR_u1",
+    "precision": "Precision",
+    "recall":    "Recall",
+    "ndcg":      "nDCG",
+    "map":       "MAP",
+    "mrr":       "MRR",
+    # item popularity bins
+    "recall_pop1":      "Recall_pop1",
+    "recall_pop2_5":    "Recall_pop2_5",
+    "recall_pop6_10":   "Recall_pop6_10",
+    "recall_pop11_20":  "Recall_pop11_20",
+    "recall_pop20plus": "Recall_pop20plus",
+    "ndcg_pop1":        "nDCG_pop1",
+    "ndcg_pop2_5":      "nDCG_pop2_5",
+    "ndcg_pop6_10":     "nDCG_pop6_10",
+    "ndcg_pop11_20":    "nDCG_pop11_20",
+    "ndcg_pop20plus":   "nDCG_pop20plus",
+    # user activity bins
+    "recall_u1":      "Recall_u1",
+    "recall_u2_5":    "Recall_u2_5",
+    "recall_u6_10":   "Recall_u6_10",
+    "recall_u11_20":  "Recall_u11_20",
+    "recall_u20plus": "Recall_u20plus",
+    "ndcg_u1":        "nDCG_u1",
+    "ndcg_u2_5":      "nDCG_u2_5",
+    "ndcg_u6_10":     "nDCG_u6_10",
+    "ndcg_u11_20":    "nDCG_u11_20",
+    "ndcg_u20plus":   "nDCG_u20plus",
 }
 
 _CUTOFFS = [10, 20, 50]
-_REQUIRED_BASE_KEYS = [f"{m}@{k}"    for m in ["precision","recall","ndcg","map","mrr"] for k in _CUTOFFS]
-_REQUIRED_U1_KEYS   = [f"{m}_u1@{k}" for m in ["precision","recall","ndcg","map","mrr"] for k in _CUTOFFS]
-_ALL_REQUIRED_KEYS  = _REQUIRED_BASE_KEYS + _REQUIRED_U1_KEYS
+_REQUIRED_BASE_KEYS  = [f"{m}@{k}" for m in ["precision","recall","ndcg","map","mrr"] for k in _CUTOFFS]
+_REQUIRED_GROUP_KEYS = [
+    f"{m}@{k}"
+    for m in [
+        "recall_pop1","recall_pop2_5","recall_pop6_10","recall_pop11_20","recall_pop20plus",
+        "ndcg_pop1",  "ndcg_pop2_5",  "ndcg_pop6_10",  "ndcg_pop11_20",  "ndcg_pop20plus",
+        "recall_u1",  "recall_u2_5",  "recall_u6_10",  "recall_u11_20",  "recall_u20plus",
+        "ndcg_u1",    "ndcg_u2_5",    "ndcg_u6_10",    "ndcg_u11_20",    "ndcg_u20plus",
+    ]
+    for k in _CUTOFFS
+]
+_ALL_REQUIRED_KEYS = _REQUIRED_BASE_KEYS + _REQUIRED_GROUP_KEYS
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +188,7 @@ def _parse_test_result(test_result: dict, model_name: str) -> list[dict]:
     rows = []
     for cutoff in sorted(by_cutoff):
         row: dict = {"model": model_name, "cutoff": cutoff}
-        for col in _BASE_METRICS + _U1_METRICS:
+        for col in _BASE_METRICS + _POP_METRICS + _USER_METRICS:
             row[col] = by_cutoff[cutoff][col]
         rows.append(row)
     return rows
@@ -189,6 +231,20 @@ def _run_one(dataset: str, model_name: str, overwrite: bool) -> str:
 
     if result is None or "test_result" not in result:
         raise RuntimeError("run_recbole() returned None or missing 'test_result'")
+
+    # Write selected-artifact metadata immediately after training
+    checkpoint_path = result.get("checkpoint_path")
+    if checkpoint_path:
+        _, meta = write_artifact(
+            framework="recbole",
+            dataset=dataset,
+            model=model_name,
+            selected_artifact=checkpoint_path,
+            artifact_type="checkpoint",
+        )
+        _print_artifact(meta)
+    else:
+        print("  [selected_artifact] WARN: checkpoint_path missing from result — metadata not written.")
 
     test_result = result["test_result"]
     rows = _parse_test_result(test_result, model_name)

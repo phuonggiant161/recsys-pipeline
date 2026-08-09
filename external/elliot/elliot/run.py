@@ -8,8 +8,10 @@ __author__ = 'Vito Walter Anelli, Claudio Pomo'
 __email__ = 'vitowalter.anelli@poliba.it, claudio.pomo@poliba.it'
 
 import importlib
+import json
 import sys
 from os import path
+from pathlib import Path
 
 import numpy as np
 from hyperopt import Trials, fmin
@@ -21,6 +23,67 @@ from elliot.utils import logging as logging_project
 
 _rstate = np.random.RandomState(42)
 here = path.abspath(path.dirname(__file__))
+
+
+def _capture_elliot_artifact(single, base):
+    """Write selected-artifact metadata after training.
+
+    Handles iterative models (FunkSVD → _it=N.tsv) and non-iterative
+    models (VSM, ItemKNN → model_name.tsv, no best_iteration).
+    Skips if name/dataset missing or rec file absent (save_recs=False).
+    """
+    try:
+        params = single.get("params") or {}
+        best_iteration = params.get("best_iteration")
+        model_name_full = single.get("name", "")
+        dataset_name = getattr(base.base_namespace, "dataset", "")
+
+        if not model_name_full or not dataset_name:
+            return
+
+        model_short = model_name_full.split("_")[0]
+        rec_dir  = getattr(base.base_namespace, "path_output_rec_result", "")
+
+        if best_iteration is not None:
+            rec_file = path.join(rec_dir, f"{model_name_full}_it={best_iteration}.tsv")
+        else:
+            rec_file = path.join(rec_dir, f"{model_name_full}.tsv")
+
+        if not path.isfile(rec_file):
+            print(f"\n[selected_artifact] WARN: rec file not found (save_recs=False?): {rec_file}")
+            return
+
+        # Project root: external/elliot/elliot/run.py → 4 parents up
+        proj_root = Path(__file__).resolve().parent.parent.parent.parent
+        meta_dir  = proj_root / "results" / "selected_artifacts" / dataset_name
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        meta_file = meta_dir / f"{model_short}.json"
+
+        data = {
+            "framework":         "elliot",
+            "dataset":           dataset_name,
+            "model":             model_short,
+            "selected_artifact": rec_file,
+            "artifact_type":     "recommendations",
+        }
+        if best_iteration is not None:
+            data["selected_iteration"] = best_iteration
+
+        tmp = meta_file.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        tmp.replace(meta_file)
+
+        print(f"\n[selected_artifact]")
+        print(f"  framework = elliot")
+        print(f"  dataset   = {dataset_name}")
+        print(f"  model     = {model_short}")
+        if best_iteration is not None:
+            print(f"  iteration = {best_iteration}")
+        print(f"  path      = {rec_file}")
+
+    except Exception as e:
+        print(f"\n[selected_artifact] WARN: Failed to write metadata: {e}")
 
 print(u'''
 __/\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\___/\\\\\\\\\\\\______/\\\\\\\\\\\\_________________________________________        
@@ -120,6 +183,7 @@ def run_experiment(config_path: str = ''):
         # Migliore sui test, aggiunta a performance totali
         min_val = np.argmin([i["loss"] for i in test_results])
 
+        _capture_elliot_artifact(test_results[min_val], base)
         res_handler.add_oneshot_recommender(**test_results[min_val])
 
         if isinstance(model_base, tuple):

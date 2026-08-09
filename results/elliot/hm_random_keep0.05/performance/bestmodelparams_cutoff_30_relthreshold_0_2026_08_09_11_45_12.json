@@ -1,0 +1,15 @@
+[
+    {
+        "default_validation_metric": "SEntropy",
+        "default_validation_cutoff": 30,
+        "rel_threshold": 0
+    },
+    {
+        "meta": {},
+        "recommender": "VSM_sim=cosine_up=tfidf_ip=tfidf_load=ItemAttributes",
+        "configuration": {
+            "path": "D:\\recsys-pipeline\\results\\elliot\\hm_random_keep0.05\\recs\\VSM_sim=cosine_up=tfidf_ip=tfidf_load=ItemAttributes.tsv",
+            "name": "VSM_sim=cosine_up=tfidf_ip=tfidf_load=ItemAttributes"
+        }
+    }
+]

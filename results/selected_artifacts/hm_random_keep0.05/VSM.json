@@ -1,0 +1,7 @@
+{
+  "framework": "elliot",
+  "dataset": "hm_random_keep0.05",
+  "model": "VSM",
+  "selected_artifact": "D:\\recsys-pipeline\\results\\elliot\\hm_random_keep0.05\\recs\\VSM_sim=cosine_up=tfidf_ip=tfidf_load=ItemAttributes.tsv",
+  "artifact_type": "recommendations"
+}
