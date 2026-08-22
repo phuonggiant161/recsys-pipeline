@@ -1,0 +1,7 @@
+{
+  "framework": "recbole",
+  "dataset": "amazon_random_keep0.3",
+  "model": "ItemKNN",
+  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\amazon_random_keep0.3\\ItemKNN\\ItemKNN-Aug-17-2026_01-56-39.pth",
+  "artifact_type": "checkpoint"
+}

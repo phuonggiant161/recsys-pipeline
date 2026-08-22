@@ -33,6 +33,20 @@ DEFAULT_OUTPUT       = PROJECT_ROOT / "results" / "_summary" / "performance_summ
 MAIN_METRICS     = ["Precision", "Recall", "nDCG", "MAP", "MRR"]
 U1_METRICS       = ["Precision_u1", "Recall_u1", "nDCG_u1", "MAP_u1", "MRR_u1"]
 ALL_METRICS      = MAIN_METRICS + U1_METRICS
+# Canonical beyond-accuracy column names used in long_df and summary sheets.
+# Elliot native → canonical:  ARP→AveragePopularity, APLT→TailPercentage (rename at collect time)
+# RecBole source: *_beyond.tsv written by external/recbole/run_evaluation.py (already canonical)
+BEYOND_ACCURACY_METRICS = ["ItemCoverage", "AveragePopularity", "Gini", "TailPercentage"]
+# Full metric set carried through build_long / check_and_dedup / build_wide
+RESULT_METRICS   = ALL_METRICS + BEYOND_ACCURACY_METRICS
+
+# Mapping: canonical name → Elliot TSV column name (Elliot uses its own metric class names)
+_ELLIOT_BEYOND_COL: dict[str, str] = {
+    "ItemCoverage":      "ItemCoverage",  # same in both
+    "AveragePopularity": "ARP",           # Elliot class ARP
+    "Gini":              "Gini",          # same in both
+    "TailPercentage":    "APLT",          # Elliot class APLT
+}
 
 EXPECTED_MODELS  = ["VSM", "FunkSVD", "ItemKNN", "BPR"]
 EXPECTED_CUTOFFS = [10, 20, 50]
@@ -217,6 +231,9 @@ def collect_elliot(elliot_root: Path, processed_root: Path, audit: list) -> list
                             "level": "WARN", "source": str(tsv),
                             "message": f"metric {metric}={v} out of [0,1]"
                         })
+                for canonical, elliot_col in _ELLIOT_BEYOND_COL.items():
+                    v = row.get(elliot_col, float("nan"))
+                    record[canonical] = float(v) if pd.notna(v) else float("nan")
                 rows.append(record)
 
     return rows
@@ -245,8 +262,29 @@ def _safe_cutoff(raw_val, source: str, audit: list) -> int | None:
     return cutoff
 
 
+def _load_beyond_index(perf_dir: Path) -> dict[tuple, dict]:
+    """Load all *_beyond.tsv files in perf_dir; return {(model_norm, cutoff): {metric: value}}."""
+    idx: dict[tuple, dict] = {}
+    for bf in sorted(perf_dir.glob("*_beyond.tsv")):
+        try:
+            bdf = pd.read_csv(bf, sep="\t")
+        except Exception:
+            continue
+        if bdf.empty or "model" not in bdf.columns or "cutoff" not in bdf.columns:
+            continue
+        for _, br in bdf.iterrows():
+            mn  = normalize_model(str(br.get("model", ""))) or str(br.get("model", ""))
+            cut = _safe_cutoff(br["cutoff"], str(bf), [])
+            if cut is None:
+                continue
+            key = (mn, cut)
+            idx[key] = {m: float(br[m]) for m in BEYOND_ACCURACY_METRICS if m in bdf.columns and pd.notna(br.get(m))}
+    return idx
+
+
 def collect_recbole(recbole_root: Path, processed_root: Path, audit: list) -> list[dict]:
-    """Collect rows from results/recbole/{exp}/performance/{Model}_recbole.tsv."""
+    """Collect rows from results/recbole/{exp}/performance/{Model}_recbole.tsv.
+    Also merges beyond-accuracy metrics from *_beyond.tsv when present."""
     if not recbole_root.exists():
         print(f"[WARN] RecBole results root not found: {recbole_root}")
         return []
@@ -266,6 +304,7 @@ def collect_recbole(recbole_root: Path, processed_root: Path, audit: list) -> li
             continue
 
         metadata = load_metadata(exp_dir.name, processed_root)
+        beyond_idx = _load_beyond_index(perf_dir)
 
         for tsv in sorted(perf_dir.glob("*_recbole.tsv")):
             m = re.match(r"^(.+)_recbole\.tsv$", tsv.name)
@@ -319,6 +358,10 @@ def collect_recbole(recbole_root: Path, processed_root: Path, audit: list) -> li
                             "level": "WARN", "source": str(tsv),
                             "message": f"metric {metric}={v} out of [0,1]"
                         })
+                # Merge beyond-accuracy metrics from *_beyond.tsv (post-hoc eval)
+                bdata = beyond_idx.get((content_norm, cutoff), {})
+                for metric in BEYOND_ACCURACY_METRICS:
+                    record[metric] = bdata.get(metric, float("nan"))
                 rows.append(record)
 
     return rows
@@ -360,7 +403,7 @@ def check_and_dedup(df: pd.DataFrame, audit: list) -> pd.DataFrame:
     if dups.empty:
         return df
 
-    metric_cols = ALL_METRICS
+    metric_cols = RESULT_METRICS
     to_drop_idx = set()
     errors      = []
 
@@ -511,10 +554,10 @@ _BASE_COLS = [
 
 def build_long(rows: list[dict]) -> pd.DataFrame:
     df = pd.DataFrame(rows)
-    for col in _BASE_COLS + SPARSITY_OUT + ALL_METRICS:
+    for col in _BASE_COLS + SPARSITY_OUT + RESULT_METRICS:
         if col not in df.columns:
-            df[col] = float("nan") if col in ALL_METRICS + SPARSITY_OUT else None
-    col_order = _BASE_COLS + [c for c in SPARSITY_OUT if c in df.columns] + ALL_METRICS
+            df[col] = float("nan") if col in RESULT_METRICS + SPARSITY_OUT else None
+    col_order = _BASE_COLS + [c for c in SPARSITY_OUT if c in df.columns] + RESULT_METRICS
     df = df[[c for c in col_order if c in df.columns]]
     df["_so"] = df["strategy"].map(_STRATEGY_ORDER).fillna(99)
     df = (
@@ -812,12 +855,13 @@ def main():
             print(f"  NO RESULTS: {exp}")
 
     # ── Build sheets ───────────────────────────────────────────────────────────
-    overall_wide = build_wide(long_df, MAIN_METRICS, "overall_wide")
-    cold_u1_wide = build_wide(long_df, U1_METRICS,   "cold_u1_wide")
-    coverage     = build_coverage(long_df, exp_models, exp_cutoffs,
-                                  cli_overrides=cli_overrides,
-                                  all_experiments=all_experiments)
-    audit_df     = pd.DataFrame(audit) if audit else pd.DataFrame(
+    overall_wide  = build_wide(long_df, MAIN_METRICS,             "overall_wide")
+    cold_u1_wide  = build_wide(long_df, U1_METRICS,               "cold_u1_wide")
+    beyond_wide   = build_wide(long_df, BEYOND_ACCURACY_METRICS,  "beyond_accuracy_wide")
+    coverage      = build_coverage(long_df, exp_models, exp_cutoffs,
+                                   cli_overrides=cli_overrides,
+                                   all_experiments=all_experiments)
+    audit_df      = pd.DataFrame(audit) if audit else pd.DataFrame(
         columns=["level", "source", "message"])
 
     # Coverage gaps (only expected pairs, experiments from processed/ included)
@@ -832,6 +876,7 @@ def main():
         "long_all_results":    long_df,
         "overall_wide":        overall_wide,
         "cold_u1_wide":        cold_u1_wide,
+        "beyond_accuracy_wide": beyond_wide,
         "experiment_coverage": coverage,
         "data_quality_audit":  audit_df,
     }

@@ -1,0 +1,3 @@
+dataset,dense_source,dense_path,dense_rows,reconstructed_rows,dense_unique_pairs,reconstructed_unique_pairs,row_count_match,pair_key_match,user_set_match,item_set_match,stable_hash_match,status
+amazon,parent_dataset,D:\recsys-pipeline\data\processed\amazon_dedup,619984,619984,619984,619984,True,True,True,True,True,PASS
+hm,parent_dataset,D:\recsys-pipeline\data\processed\hm_dedup,636374,636374,636374,636374,True,True,True,True,True,PASS

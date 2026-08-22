@@ -20,28 +20,28 @@ from src.dataset_folder import (
 )
 
 # ── Default constants (edit here, or override via CLI args) ──────────────────
-DATASET_NAME   = "amazon"   # "hm"
-K_USER         = 15              # min interactions per user
-K_ITEM         = 12         # min interactions per item
-TEST_SIZE       = 0.1                           # pool → test
-VALID_SIZE      = 0.1
-KEEP_FRACS     = [0.9, 0.7, 0.5, 0.3, 0.1]
-HEAD_KEEP_FRACS = [0.1]
-TAIL_KEEP_FRACS = [0.1]
-SEED           = 42
-DEDUP_USER_ITEM = True            # True → keep last interaction per user-item pair
-
-# # ── H&M preset ────────────────────────────────────────
-# DATASET_NAME    = "hm"
-# K_USER          = 35
-# K_ITEM          = 25
+# DATASET_NAME   = "amazon"   # "hm"
+# K_USER         = 12              # min interactions per user
+# K_ITEM         = 12         # min interactions per item
 # TEST_SIZE       = 0.1                           # pool → test
-# VALID_SIZE      = 0.1                           # train_pool → valid
-# KEEP_FRACS      = [0.9, 0.7, 0.5, 0.1, 0.05]   # random thinning levels
+# VALID_SIZE      = 0.1
+# KEEP_FRACS     = [0.9, 0.7, 0.5, 0.3, 0.1]
 # HEAD_KEEP_FRACS = [0.1]
 # TAIL_KEEP_FRACS = [0.1]
-# SEED            = 42
-# DEDUP_USER_ITEM = True
+# SEED           = 42
+# DEDUP_USER_ITEM = True            # True → keep last interaction per user-item pair
+
+# # ── H&M preset ────────────────────────────────────────
+DATASET_NAME    = "hm"
+K_USER          = 35
+K_ITEM          = 35
+TEST_SIZE       = 0.1                           # pool → test
+VALID_SIZE      = 0.1                           # train_pool → valid
+KEEP_FRACS      = [0.9, 0.7, 0.5, 0.1, 0.05]   # random thinning levels
+HEAD_KEEP_FRACS = [0.1]
+TAIL_KEEP_FRACS = [0.1]
+SEED            = 42
+DEDUP_USER_ITEM = True
 
 
 def _desired_holdout_sum(df: pd.DataFrame, user_col: str, holdout_size: float) -> int:
@@ -65,6 +65,50 @@ def parse_args():
     p.add_argument("--k-item", type=int, default=None, dest="k_item",
                    help=f"Min interactions per item for k-core (default: {K_ITEM})")
     return p.parse_args()
+
+# add history of items for each user to the dataset
+    dense_df = add_user_item_history(dense_df, user_col, item_col, timestamp_col)
+ 
+def add_user_item_history(
+    df: pd.DataFrame,
+    user_col: str,
+    item_col: str,
+    timestamp_col: str,
+    max_item_list_length: int = 50,
+) -> pd.DataFrame:
+    """Add each interaction's previous item history in chronological order."""
+    if max_item_list_length < 1:
+        raise ValueError("max_item_list_length must be at least 1")
+ 
+    required_columns = {user_col, item_col, timestamp_col}
+    missing_columns = required_columns - set(df.columns)
+    if missing_columns:
+        raise KeyError(f"Missing required columns: {sorted(missing_columns)}")
+ 
+    result = df.copy()
+    result["item_id_list"] = ""
+ 
+    work = result.reset_index(drop=False).rename(columns={"index": "__row_order"})
+    work = work.sort_values(
+        [user_col, timestamp_col, "__row_order"],
+        kind="stable",
+    )
+ 
+    # Build item history for each user in chronological order, limited to max_item_list_length
+    fakeitem = "__FAKE_ITEM__"      # fake item to use for first interaction (no history)
+    histories: dict[int, str] = {}
+    for _, user_rows in work.groupby(user_col, sort=False):
+        item_history: list[str] = []
+        for row_index, item_id in zip(user_rows["__row_order"], user_rows[item_col]):
+            if len(item_history) == 0:
+                histories[row_index] = fakeitem
+            else:
+                histories[row_index] = " ".join(item_history[-max_item_list_length:])
+            item_history.append(str(item_id))
+ 
+    result["item_id_list"] = pd.Series(histories).reindex(result.index, fill_value="")
+    return result
+ 
 
 
 def _format_sig_pct(x, sig=2):
@@ -388,6 +432,9 @@ def main():
         "reference_stats": dense_reference_stats,
         "metrics": dense_metrics,
     }
+
+    # add history of items for each user to the dataset
+    dense_df = add_user_item_history(dense_df, user_col, item_col, timestamp_col)
 
     save_dataset_folder(
         df=dense_df,

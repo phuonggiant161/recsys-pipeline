@@ -1,0 +1,3 @@
+dataset,users,min_dense_count,min_theoretical_final_count,min_actual_final_count,users_below_theoretical_bound,users_with_final_count_0,users_with_final_count_1,coldstart_user_fraction_manual,coldstart_user_pct_manual,test_conservation_violations,valid_conservation_violations,status
+amazon,27525,12,9,9,0,0,0,0.0,0.0,0,0,PASS
+hm,12905,35,27,27,0,0,0,0.0,0.0,0,0,PASS

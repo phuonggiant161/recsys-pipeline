@@ -26,7 +26,7 @@
                 "verbose": true
             },
             "name": "FunkSVD_seed=42_e=100_bs=512_factors=64_lr=0$0001_reg_w=0$1_reg_b=0$001",
-            "best_iteration": 20
+            "best_iteration": 19
         }
     }
 ]

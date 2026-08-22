@@ -1,0 +1,17 @@
+dataset,folder,keep_frac,official_coldstart_user_fraction,manual_coldstart_user_fraction,coldstart_user_match,official_coldstart_item_fraction,manual_coldstart_item_fraction,coldstart_item_match,official_n_interactions,manual_unique_pairs,n_interactions_match,status
+amazon,amazon_dedup_base_split,1.0,0.0,0.0,True,0.0008861757,0.0008861757,True,482225,482225,True,PASS
+amazon,amazon_head_keep0.1,0.1,0.7393278837,0.7393278837,True,0.4371799921,0.4371799921,True,44891,44891,True,PASS
+amazon,amazon_random_keep0.1,0.1,0.7311171662,0.7311171662,True,0.5627215439,0.5627215439,True,44234,44234,True,PASS
+amazon,amazon_random_keep0.3,0.3,0.1244323342,0.1244323342,True,0.049576605,0.049576605,True,135575,135575,True,PASS
+amazon,amazon_random_keep0.5,0.5,0.0082470481,0.0082470481,True,0.0062032296,0.0062032296,True,237102,237102,True,PASS
+amazon,amazon_random_keep0.7,0.7,0.0002179837,0.0002179837,True,0.0018708153,0.0018708153,True,336482,336482,True,PASS
+amazon,amazon_random_keep0.9,0.9,0.0,0.0,True,0.0009354076,0.0009354076,True,433994,433994,True,PASS
+amazon,amazon_tail_keep0.1,0.1,0.6935149864,0.6935149864,True,0.718836156,0.718836156,True,44796,44796,True,PASS
+hm,hm_dedup_base_split,1.0,0.0,0.0,True,0.0009017133,0.0009017133,True,506649,506649,True,PASS
+hm,hm_head_keep0.1,0.1,0.1870592793,0.1870592793,True,0.0046588518,0.0046588518,True,44925,44925,True,PASS
+hm,hm_random_keep0.05,0.05,0.6261139093,0.6261139093,True,0.4107303877,0.4107303877,True,21227,21227,True,PASS
+hm,hm_random_keep0.1,0.1,0.1772181325,0.1772181325,True,0.1014427412,0.1014427412,True,44908,44908,True,PASS
+hm,hm_random_keep0.5,0.5,0.0,0.0,True,0.0045085663,0.0045085663,True,250766,250766,True,PASS
+hm,hm_random_keep0.7,0.7,0.0,0.0,True,0.0018034265,0.0018034265,True,352785,352785,True,PASS
+hm,hm_random_keep0.9,0.9,0.0,0.0,True,0.0018034265,0.0018034265,True,455408,455408,True,PASS
+hm,hm_tail_keep0.1,0.1,0.2099186362,0.2099186362,True,0.65374211,0.65374211,True,45566,45566,True,PASS

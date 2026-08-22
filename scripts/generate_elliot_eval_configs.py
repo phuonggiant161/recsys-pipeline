@@ -45,10 +45,13 @@ _BASE_CONFIG: dict = {
         },
         "top_k": 50,
         "evaluation": {
-            "cutoffs": [30],
+            "cutoffs": [10, 20, 50],
             "simple_metrics": [
                 "SEntropy",
                 "Gini",
+                "ItemCoverage",
+                "ARP",
+                "APLT",
                 "Recall",
                 "nDCG",
                 "Recall_pop1",

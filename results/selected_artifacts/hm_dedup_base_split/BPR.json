@@ -1,0 +1,7 @@
+{
+  "framework": "recbole",
+  "dataset": "hm_dedup_base_split",
+  "model": "BPR",
+  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\hm_dedup_base_split\\BPR\\BPR-Aug-17-2026_19-16-00.pth",
+  "artifact_type": "checkpoint"
+}

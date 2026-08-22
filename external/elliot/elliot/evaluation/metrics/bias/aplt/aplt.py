@@ -13,6 +13,25 @@ import numpy as np
 from elliot.evaluation.metrics.base_metric import BaseMetric
 
 
+def _first_seen_rank(train_path: str) -> dict:
+    """Return {item_id: rank} where rank is 0-based first-appearance row index in the training file.
+
+    Reads the TSV line by line; item ID is the second tab-separated token (index 1),
+    matching Elliot DataSetLoader column order: userId, itemId, rating[, timestamp].
+    """
+    rank_map: dict = {}
+    rank = 0
+    with open(train_path, encoding="utf-8", newline="") as fh:
+        for line in fh:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) >= 2:
+                item_id = parts[1]
+                if item_id not in rank_map:
+                    rank_map[item_id] = rank
+                    rank += 1
+    return rank_map
+
+
 class APLT(BaseMetric):
     r"""
     Average percentage of long tail items
@@ -47,7 +66,19 @@ class APLT(BaseMetric):
         """
         super().__init__(recommendations, config, params, eval_objects)
         self._cutoff = self._evaluation_objects.cutoff
-        self._long_tail = self._evaluation_objects.pop.get_long_tail()
+        # Thesis customization:
+        # Long-tail is defined as the bottom 10% least-popular training items.
+        # Ties are resolved by training first-appearance order to reproduce
+        # RecBole TailPercentage (tail_ratio=0.1) semantics.
+        train_path = self._evaluation_objects.data.config.data_config.train_path
+        rank_map = _first_seen_rank(train_path)
+        pop_items = self._evaluation_objects.pop.get_pop_items()
+        sorted_items = sorted(
+            pop_items.items(),
+            key=lambda kv: (kv[1], rank_map.get(kv[0], len(rank_map)))
+        )
+        cut = max(int(len(sorted_items) * 0.1), 1)
+        self._long_tail = [item for item, _ in sorted_items[:cut]]
 
     @staticmethod
     def name():

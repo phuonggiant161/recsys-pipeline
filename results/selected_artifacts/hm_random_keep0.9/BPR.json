@@ -1,0 +1,7 @@
+{
+  "framework": "recbole",
+  "dataset": "hm_random_keep0.9",
+  "model": "BPR",
+  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\hm_random_keep0.9\\BPR\\BPR-Aug-17-2026_21-40-08.pth",
+  "artifact_type": "checkpoint"
+}

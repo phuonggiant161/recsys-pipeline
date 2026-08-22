@@ -1,8 +1,8 @@
 """
 Convert pipeline train/valid/test CSVs to RecBole Atomic Files (.inter).
 
-Each atomic file has exactly three columns:
-    user_id:token  item_id:token  timestamp:float
+Each atomic file has exactly four columns:
+    user_id:token  item_id:token  timestamp:float  item_id_list:token_seq
 
 Source : data/processed/<dataset>/{train,valid,test}.csv
 Output : data/recbole/<dataset>/<dataset>.{train,valid,test}.inter
@@ -21,7 +21,9 @@ import pandas as pd
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-RECBOLE_HEADER = "user_id:token\titem_id:token\ttimestamp:float"
+RECBOLE_HEADER = (
+    "user_id:token\titem_id:token\ttimestamp:float\titem_id_list:token_seq"
+)
 
 USER_ALIASES = ["user_id", "user", "uid", "userid", "customer_id"]
 ITEM_ALIASES = ["item_id", "item", "iid", "itemid", "parent_asin", "article_id", "asin"]
@@ -135,7 +137,7 @@ def _to_float_timestamp(series: pd.Series, path: Path) -> pd.Series:
 # ---------------------------------------------------------------------------
 
 def _load_split(path: Path) -> tuple[pd.DataFrame, int]:
-    """Load CSV; return (df[user_id, item_id, timestamp], n_source_rows).
+    """Load CSV; return the RecBole interaction fields and source row count.
 
     n_source_rows == len(df) always — no rows are dropped.
     """
@@ -150,12 +152,20 @@ def _load_split(path: Path) -> tuple[pd.DataFrame, int]:
         if nulls > 0:
             raise ValueError(f"{role} column has {nulls} null values in {path}")
 
+    if "item_id_list" not in df_raw.columns:
+        raise ValueError(
+            f"History column 'item_id_list' not found in {path}\n"
+            f"  Columns present: {list(df_raw.columns)}"
+        )
+
     ts_float = _to_float_timestamp(df_raw[ts_col], path)
+    item_id_list = df_raw["item_id_list"].fillna("")
 
     out = pd.DataFrame({
-        "user_id":   df_raw[user_col].values,
-        "item_id":   df_raw[item_col].values,
-        "timestamp": ts_float.values,
+        "user_id":      df_raw[user_col].values,
+        "item_id":      df_raw[item_col].values,
+        "timestamp":    ts_float.values,
+        "item_id_list": item_id_list.values,
     })
 
     if len(out) != n_input:
@@ -174,9 +184,14 @@ def _write_inter(df: pd.DataFrame, out: Path) -> None:
 
 def _validate_inter(path: Path, expected_rows: int) -> dict:
     """Read back written file and assert correctness. Returns stats dict."""
-    df = pd.read_csv(path, sep="\t")
+    df = pd.read_csv(path, sep="\t", keep_default_na=False)
     actual_cols = list(df.columns)
-    expected_cols = ["user_id:token", "item_id:token", "timestamp:float"]
+    expected_cols = [
+        "user_id:token",
+        "item_id:token",
+        "timestamp:float",
+        "item_id_list:token_seq",
+    ]
 
     if actual_cols != expected_cols:
         raise AssertionError(
@@ -194,6 +209,8 @@ def _validate_inter(path: Path, expected_rows: int) -> dict:
         raise AssertionError(f"Null item_id found in {path}")
     if df["timestamp:float"].isna().any():
         raise AssertionError(f"Null timestamp found in {path}")
+    if df["item_id_list:token_seq"].isna().any():
+        raise AssertionError(f"Null item_id_list found in {path}")
 
     ts = pd.to_numeric(df["timestamp:float"], errors="coerce")
     if ts.isna().any():

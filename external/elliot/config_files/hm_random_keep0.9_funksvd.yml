@@ -19,6 +19,9 @@ experiment:
       - MRR
       - SEntropy
       - Gini
+      - ItemCoverage
+      - ARP
+      - APLT
       - Recall_pop1
       - Recall_pop2_5
       - Recall_pop6_10

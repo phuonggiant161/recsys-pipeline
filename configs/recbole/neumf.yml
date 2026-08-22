@@ -28,6 +28,7 @@ mlp_embedding_size: 64
 mlp_hidden_size:
   - 128
   - 64
+  - 32
 
 dropout_prob: 0.1
 
@@ -36,12 +37,12 @@ mlp_train: true
 use_pretrain: false
 
 # --- Training ---
-epochs: 300
+epochs: 100
 train_batch_size: 2048
 eval_batch_size: 4096
 
 learner: adam
-learning_rate: 0.001
+learning_rate: 0.0001
 weight_decay: 0.0
 
 train_neg_sample_args:
@@ -66,11 +67,6 @@ metrics:
   - NDCG
   - MAP
   - MRR
-  - U1Precision
-  - U1Recall
-  - U1NDCG
-  - U1MAP
-  - U1MRR
 
 topk:
   - 10

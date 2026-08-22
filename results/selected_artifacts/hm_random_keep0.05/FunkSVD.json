@@ -1,0 +1,8 @@
+{
+  "framework": "elliot",
+  "dataset": "hm_random_keep0.05",
+  "model": "FunkSVD",
+  "selected_artifact": "D:\\recsys-pipeline\\results\\elliot\\hm_random_keep0.05\\recs\\FunkSVD_seed=42_e=100_bs=512_factors=64_lr=0$0001_reg_w=0$1_reg_b=0$001_it=10.tsv",
+  "artifact_type": "recommendations",
+  "selected_iteration": 10
+}

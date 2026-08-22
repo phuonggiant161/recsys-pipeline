@@ -22,12 +22,12 @@ user_inter_num_interval: "[0,inf)"
 item_inter_num_interval: "[0,inf)"
 
 # --- Training ---
-epochs: 300
+epochs: 100
 train_batch_size: 2048
 eval_batch_size: 4096
 
 learner: adam
-learning_rate: 0.0001
+learning_rate: 0.001
 weight_decay: 0
 
 embedding_size: 256
@@ -54,30 +54,6 @@ metrics:
   - NDCG
   - MAP
   - MRR
-
-  - PopRecall_pop1
-  - PopRecall_pop2_5
-  - PopRecall_pop6_10
-  - PopRecall_pop11_20
-  - PopRecall_pop20plus
-
-  - PopNDCG_pop1
-  - PopNDCG_pop2_5
-  - PopNDCG_pop6_10
-  - PopNDCG_pop11_20
-  - PopNDCG_pop20plus
-
-  - UserRecall_u1
-  - UserRecall_u2_5
-  - UserRecall_u6_10
-  - UserRecall_u11_20
-  - UserRecall_u20plus
-
-  - UserNDCG_u1
-  - UserNDCG_u2_5
-  - UserNDCG_u6_10
-  - UserNDCG_u11_20
-  - UserNDCG_u20plus
 
 topk:
   - 10

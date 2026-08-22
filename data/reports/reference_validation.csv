@@ -1,0 +1,3 @@
+dataset,base_folder,base_candidates_detected,multiple_base_detected,base_users_from_reference,base_users_from_train,base_items_from_reference,base_items_from_train,reference_user_match,reference_item_match,status
+amazon,amazon_dedup_base_split,amazon_dedup_base_split,False,27525,27525,20312,20312,True,True,PASS
+hm,hm_dedup_base_split,hm_dedup_base_split,False,12905,12905,6654,6654,True,True,PASS

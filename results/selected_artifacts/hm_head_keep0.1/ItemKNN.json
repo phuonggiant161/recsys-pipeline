@@ -1,0 +1,7 @@
+{
+  "framework": "recbole",
+  "dataset": "hm_head_keep0.1",
+  "model": "ItemKNN",
+  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\hm_head_keep0.1\\ItemKNN\\ItemKNN-Aug-17-2026_02-10-58.pth",
+  "artifact_type": "checkpoint"
+}

@@ -1,0 +1,2 @@
+model	SEntropy	Gini	Recall_tail	nDCG_tail	Recall	nDCG
+FunkSVD_seed=42_e=100_bs=512_factors=64_lr=0$0001_reg_w=0$1_reg_b=0$001_it=27	6.470196923739408	0.0070718569038168	0.0	0.0	0.0056728461566876	0.0031800807964529

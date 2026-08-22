@@ -1,0 +1,7 @@
+{
+  "framework": "recbole",
+  "dataset": "amazon_dedup_base_split",
+  "model": "ItemKNN",
+  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\amazon_dedup_base_split\\ItemKNN\\ItemKNN-Aug-17-2026_01-48-49.pth",
+  "artifact_type": "checkpoint"
+}
