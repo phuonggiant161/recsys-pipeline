@@ -1,0 +1,7 @@
+{
+  "framework": "recbole",
+  "dataset": "hm_random_keep0.6",
+  "model": "NeuMF",
+  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\hm_random_keep0.6\\NeuMF\\NeuMF-Aug-28-2026_04-34-41.pth",
+  "artifact_type": "checkpoint"
+}

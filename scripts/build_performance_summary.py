@@ -31,14 +31,17 @@ DEFAULT_OUTPUT       = PROJECT_ROOT / "results" / "_summary" / "performance_summ
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 MAIN_METRICS     = ["Precision", "Recall", "nDCG", "MAP", "MRR"]
-U1_METRICS       = ["Precision_u1", "Recall_u1", "nDCG_u1", "MAP_u1", "MRR_u1"]
-ALL_METRICS      = MAIN_METRICS + U1_METRICS
+COLD_U1_METRICS  = ["Recall_u1", "nDCG_u1"]
 # Canonical beyond-accuracy column names used in long_df and summary sheets.
 # Elliot native → canonical:  ARP→AveragePopularity, APLT→TailPercentage (rename at collect time)
-# RecBole source: *_beyond.tsv written by external/recbole/run_evaluation.py (already canonical)
+# RecBole source: *_evaluation.tsv written by external/recbole/run_evaluation.py (already canonical)
 BEYOND_ACCURACY_METRICS = ["ItemCoverage", "AveragePopularity", "Gini", "TailPercentage"]
+POP_GROUP_SUFFIXES  = ["pop1", "pop2_5", "pop6_10", "pop11_20", "pop20plus"]
+USER_GROUP_SUFFIXES = ["u1", "u2_5", "u6_10", "u11_20", "u20plus"]
+POP_METRICS  = [f"Recall_{s}" for s in POP_GROUP_SUFFIXES] + [f"nDCG_{s}" for s in POP_GROUP_SUFFIXES]
+USER_METRICS = [f"Recall_{s}" for s in USER_GROUP_SUFFIXES] + [f"nDCG_{s}" for s in USER_GROUP_SUFFIXES]
 # Full metric set carried through build_long / check_and_dedup / build_wide
-RESULT_METRICS   = ALL_METRICS + BEYOND_ACCURACY_METRICS
+RESULT_METRICS = MAIN_METRICS + BEYOND_ACCURACY_METRICS + POP_METRICS + USER_METRICS
 
 # Mapping: canonical name → Elliot TSV column name (Elliot uses its own metric class names)
 _ELLIOT_BEYOND_COL: dict[str, str] = {
@@ -46,6 +49,19 @@ _ELLIOT_BEYOND_COL: dict[str, str] = {
     "AveragePopularity": "ARP",           # Elliot class ARP
     "Gini":              "Gini",          # same in both
     "TailPercentage":    "APLT",          # Elliot class APLT
+}
+
+# Mapping: RecBole evaluation.tsv raw metric name (lowercase, no @cutoff) → canonical
+# Used when parsing *_evaluation.tsv wide-format files
+_RECBOLE_EVAL_COL: dict[str, str] = {
+    "precision": "Precision", "recall": "Recall", "ndcg": "nDCG",
+    "map": "MAP", "mrr": "MRR",
+    "itemcoverage": "ItemCoverage", "averagepopularity": "AveragePopularity",
+    "giniindex": "Gini", "tailpercentage": "TailPercentage",
+    **{f"recall_{s}": f"Recall_{s}" for s in POP_GROUP_SUFFIXES},
+    **{f"ndcg_{s}":   f"nDCG_{s}"   for s in POP_GROUP_SUFFIXES},
+    **{f"recall_{s}": f"Recall_{s}" for s in USER_GROUP_SUFFIXES},
+    **{f"ndcg_{s}":   f"nDCG_{s}"   for s in USER_GROUP_SUFFIXES},
 }
 
 EXPECTED_MODELS  = ["VSM", "FunkSVD", "ItemKNN", "BPR"]
@@ -76,6 +92,7 @@ _MODEL_NORM: dict[str, str] = {
     "vsm":      "VSM",
     "itemknn":  "ItemKNN",
     "bpr":      "BPR",
+    "neumf":    "NeuMF",
     "mostpop":  "MostPop",
     "fm":       "FM",
     "lightgcn": "LightGCN",
@@ -223,7 +240,7 @@ def collect_elliot(elliot_root: Path, processed_root: Path, audit: list) -> list
                     **{k: metadata.get(k) for k in ["k_user", "k_item"]},
                     **{k: metadata.get(k, float("nan")) for k in SPARSITY_OUT if k not in ["k_user", "k_item"]},
                 }
-                for metric in ALL_METRICS:
+                for metric in MAIN_METRICS + POP_METRICS + USER_METRICS:
                     v = row.get(metric, float("nan"))
                     record[metric] = float(v) if pd.notna(v) else float("nan")
                     if pd.notna(v) and not (0 <= float(v) <= 1):
@@ -282,9 +299,59 @@ def _load_beyond_index(perf_dir: Path) -> dict[tuple, dict]:
     return idx
 
 
+def _collect_recbole_from_evaluation(
+    tsv: Path, exp_dir_name: str, exp_meta: dict, metadata: dict, audit: list
+) -> list[dict]:
+    """Parse *_evaluation.tsv (wide format, one row per model, cols like recall@20).
+    Returns one record per (model, cutoff) with all canonical metrics."""
+    try:
+        df = pd.read_csv(tsv, sep="\t")
+    except Exception as e:
+        audit.append({"level": "ERROR", "source": str(tsv), "message": f"Read error: {e}"})
+        return []
+    if df.empty or "model" not in df.columns:
+        audit.append({"level": "WARN", "source": str(tsv), "message": "Empty or no 'model' column"})
+        return []
+
+    # Discover {cutoff: {canonical_metric: raw_col}} from column names like "recall@20"
+    cutoff_metric_map: dict[int, dict[str, str]] = {}
+    for col in df.columns:
+        m = re.match(r'^(.+)@(\d+)$', col)
+        if not m:
+            continue
+        canonical = _RECBOLE_EVAL_COL.get(m.group(1).lower())
+        if canonical is None:
+            continue
+        cutoff = int(m.group(2))
+        cutoff_metric_map.setdefault(cutoff, {})[canonical] = col
+
+    rows = []
+    for _, row in df.iterrows():
+        model_raw  = str(row.get("model", ""))
+        model_norm = normalize_model(model_raw) or model_raw
+        for cutoff, metric_col_map in sorted(cutoff_metric_map.items()):
+            record = {
+                "framework":   "recbole",
+                "experiment":  exp_dir_name,
+                "source_file": str(tsv),
+                "model":       model_norm,
+                "full_model":  model_raw,
+                "cutoff":      cutoff,
+                **exp_meta,
+                **{k: metadata.get(k) for k in ["k_user", "k_item"]},
+                **{k: metadata.get(k, float("nan")) for k in SPARSITY_OUT if k not in ["k_user", "k_item"]},
+            }
+            for canonical, raw_col in metric_col_map.items():
+                v = row.get(raw_col, float("nan"))
+                record[canonical] = float(v) if pd.notna(v) else float("nan")
+            rows.append(record)
+    return rows
+
+
 def collect_recbole(recbole_root: Path, processed_root: Path, audit: list) -> list[dict]:
-    """Collect rows from results/recbole/{exp}/performance/{Model}_recbole.tsv.
-    Also merges beyond-accuracy metrics from *_beyond.tsv when present."""
+    """Collect rows from results/recbole/{exp}/performance/.
+    Priority: *_evaluation.tsv (all metrics in one file).
+    Fallback: *_recbole.tsv + *_beyond.tsv (legacy format)."""
     if not recbole_root.exists():
         print(f"[WARN] RecBole results root not found: {recbole_root}")
         return []
@@ -304,41 +371,57 @@ def collect_recbole(recbole_root: Path, processed_root: Path, audit: list) -> li
             continue
 
         metadata = load_metadata(exp_dir.name, processed_root)
-        beyond_idx = _load_beyond_index(perf_dir)
 
-        for tsv in sorted(perf_dir.glob("*_recbole.tsv")):
-            m = re.match(r"^(.+)_recbole\.tsv$", tsv.name)
-            if not m:
+        # Index files by model prefix
+        eval_files = {
+            m.group(1): f
+            for f in sorted(perf_dir.glob("*_evaluation.tsv"))
+            if (m := re.match(r"^(.+)_evaluation\.tsv$", f.name))
+        }
+        recbole_files = {
+            m.group(1): f
+            for f in sorted(perf_dir.glob("*_recbole.tsv"))
+            if (m := re.match(r"^(.+)_recbole\.tsv$", f.name))
+        }
+
+        # Priority: use *_evaluation.tsv when available
+        for fname_model, tsv in eval_files.items():
+            rows.extend(_collect_recbole_from_evaluation(
+                tsv, exp_dir.name, exp_meta, metadata, audit))
+            if fname_model in recbole_files:
+                audit.append({
+                    "level": "WARN", "source": str(tsv),
+                    "message": (f"Both _evaluation.tsv and _recbole.tsv exist for "
+                                f"'{fname_model}' — using evaluation file only"),
+                })
+
+        # Fallback: models with only legacy *_recbole.tsv
+        beyond_idx = _load_beyond_index(perf_dir) if recbole_files else {}
+        for fname_model, tsv in recbole_files.items():
+            if fname_model in eval_files:
                 continue
-            fname_model = m.group(1)
-
             try:
                 df = pd.read_csv(tsv, sep="\t")
             except Exception as e:
                 audit.append({"level": "ERROR", "source": str(tsv), "message": f"Read error: {e}"})
                 continue
-
             if df.empty or "model" not in df.columns or "cutoff" not in df.columns:
                 audit.append({"level": "WARN", "source": str(tsv),
                                "message": "Empty or missing 'model'/'cutoff' columns"})
                 continue
-
             for _, row in df.iterrows():
                 cutoff = _safe_cutoff(row["cutoff"], str(tsv), audit)
                 if cutoff is None:
                     continue
-
                 content_model = str(row.get("model", "")).strip()
                 content_norm  = normalize_model(content_model) or content_model
                 fname_norm    = normalize_model(fname_model) or fname_model
-
                 if content_norm != fname_norm:
                     audit.append({
                         "level": "WARN", "source": str(tsv),
                         "message": (f"Model mismatch: filename '{fname_norm}', "
-                                    f"content '{content_norm}' (using content)")
+                                    f"content '{content_norm}' (using content)"),
                     })
-
                 record = {
                     "framework":   "recbole",
                     "experiment":  exp_dir.name,
@@ -350,15 +433,9 @@ def collect_recbole(recbole_root: Path, processed_root: Path, audit: list) -> li
                     **{k: metadata.get(k) for k in ["k_user", "k_item"]},
                     **{k: metadata.get(k, float("nan")) for k in SPARSITY_OUT if k not in ["k_user", "k_item"]},
                 }
-                for metric in ALL_METRICS:
+                for metric in MAIN_METRICS:
                     v = row.get(metric, float("nan"))
                     record[metric] = float(v) if pd.notna(v) else float("nan")
-                    if pd.notna(v) and not (0 <= float(v) <= 1):
-                        audit.append({
-                            "level": "WARN", "source": str(tsv),
-                            "message": f"metric {metric}={v} out of [0,1]"
-                        })
-                # Merge beyond-accuracy metrics from *_beyond.tsv (post-hoc eval)
                 bdata = beyond_idx.get((content_norm, cutoff), {})
                 for metric in BEYOND_ACCURACY_METRICS:
                     record[metric] = bdata.get(metric, float("nan"))
@@ -855,13 +932,15 @@ def main():
             print(f"  NO RESULTS: {exp}")
 
     # ── Build sheets ───────────────────────────────────────────────────────────
-    overall_wide  = build_wide(long_df, MAIN_METRICS,             "overall_wide")
-    cold_u1_wide  = build_wide(long_df, U1_METRICS,               "cold_u1_wide")
-    beyond_wide   = build_wide(long_df, BEYOND_ACCURACY_METRICS,  "beyond_accuracy_wide")
-    coverage      = build_coverage(long_df, exp_models, exp_cutoffs,
-                                   cli_overrides=cli_overrides,
-                                   all_experiments=all_experiments)
-    audit_df      = pd.DataFrame(audit) if audit else pd.DataFrame(
+    overall_wide      = build_wide(long_df, MAIN_METRICS,            "overall_wide")
+    cold_u1_wide      = build_wide(long_df, COLD_U1_METRICS,         "cold_u1_wide")
+    beyond_wide       = build_wide(long_df, BEYOND_ACCURACY_METRICS, "beyond_accuracy_wide")
+    pop_groups_wide   = build_wide(long_df, POP_METRICS,             "popularity_groups_wide")
+    user_groups_wide  = build_wide(long_df, USER_METRICS,            "user_groups_wide")
+    coverage          = build_coverage(long_df, exp_models, exp_cutoffs,
+                                       cli_overrides=cli_overrides,
+                                       all_experiments=all_experiments)
+    audit_df          = pd.DataFrame(audit) if audit else pd.DataFrame(
         columns=["level", "source", "message"])
 
     # Coverage gaps (only expected pairs, experiments from processed/ included)
@@ -873,12 +952,14 @@ def main():
 
     # ── Write Excel ────────────────────────────────────────────────────────────
     sheets = {
-        "long_all_results":    long_df,
-        "overall_wide":        overall_wide,
-        "cold_u1_wide":        cold_u1_wide,
-        "beyond_accuracy_wide": beyond_wide,
-        "experiment_coverage": coverage,
-        "data_quality_audit":  audit_df,
+        "long_all_results":      long_df,
+        "overall_wide":          overall_wide,
+        "cold_u1_wide":          cold_u1_wide,
+        "beyond_accuracy_wide":  beyond_wide,
+        "popularity_groups_wide": pop_groups_wide,
+        "user_groups_wide":      user_groups_wide,
+        "experiment_coverage":   coverage,
+        "data_quality_audit":    audit_df,
     }
     write_excel(sheets, output_path)
 

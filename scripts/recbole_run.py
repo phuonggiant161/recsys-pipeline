@@ -47,6 +47,7 @@ _MODEL_TO_YAML: dict[str, Path] = {
     "BPR":     _PROJECT_ROOT / "configs" / "recbole" / "bpr.yml",
     "ItemKNN": _PROJECT_ROOT / "configs" / "recbole" / "itemknn.yml",
     "NeuMF":   _PROJECT_ROOT / "configs" / "recbole" / "neumf.yml",
+    "LightGCN": _PROJECT_ROOT / "configs" / "recbole" / "lightgcn.yml",
 }
 _ALL_MODELS = list(_MODEL_TO_YAML.keys())
 

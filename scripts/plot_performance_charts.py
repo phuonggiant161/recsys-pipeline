@@ -1,6 +1,6 @@
 """
 Plot performance charts from the unified summary workbook.
-3 analysis groups: random, coldstart_u1, gini.
+6 analysis groups: random, coldstart_u1, coldstart_pop1, gini, beyond_accuracy, coldstart_groups.
 
 Usage:
     python scripts/plot_performance_charts.py
@@ -47,16 +47,23 @@ DEFAULT_OUTDIR = PROJECT_ROOT / "results" / "figures" / "performance_charts"
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 SAVE_DPI    = 300
-MODEL_ORDER = ["VSM", "ItemKNN", "FunkSVD", "BPR"]
+MODEL_ORDER = ["VSM", "ItemKNN", "FunkSVD", "BPR", "NeuMF"]
 
 _BASE_COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
                 "#9467bd", "#8c564b", "#e377c2", "#7f7f7f"]
 _LINESTYLES  = ["-", "--", "-.", ":", (0, (3, 1, 1, 1))]
 _MARKERS     = ["o", "s", "D", "^", "v", "P", "X", "*"]
 
-MAIN_METRICS   = ["Precision", "Recall", "nDCG", "MAP", "MRR"]
-U1_METRICS     = ["Precision_u1", "Recall_u1", "nDCG_u1", "MAP_u1", "MRR_u1"]
-RANDOM_CUTOFFS = [10, 20, 50]
+MAIN_METRICS            = ["Precision", "Recall", "nDCG", "MAP", "MRR"]
+COLD_U1_METRICS         = ["Recall_u1", "nDCG_u1"]
+COLD_POP1_METRICS       = ["Recall_pop1", "nDCG_pop1"]
+BEYOND_ACCURACY_METRICS = ["ItemCoverage", "AveragePopularity", "Gini", "TailPercentage"]
+POP_GROUP_SUFFIXES      = ["pop1", "pop2_5", "pop6_10", "pop11_20", "pop20plus"]
+USER_GROUP_SUFFIXES     = ["u1", "u2_5", "u6_10", "u11_20", "u20plus"]
+POP_GROUP_LABELS        = ["Pop 1", "Pop 2-5", "Pop 6-10", "Pop 11-20", "Pop 20+"]
+USER_GROUP_LABELS       = ["U 1", "U 2-5", "U 6-10", "U 11-20", "U 20+"]
+RANDOM_CUTOFFS          = [10, 20, 50]
+GROUP_CUTOFF            = 20
 
 # x_key -> (df_column, display_label)
 X_AXIS_MAP = {
@@ -341,7 +348,7 @@ def generate_coldstart_charts(df: pd.DataFrame, out_base: Path, palette: dict) -
         mixed  = check_mixed_frameworks(sub_c, f"coldstart_u1/{ds}")
 
         for x_key, (x_col, x_label) in X_AXIS_MAP.items():
-            for y_metric in U1_METRICS:
+            for y_metric in COLD_U1_METRICS:
                 out_path = (
                     out_base / ds / "coldstart_u1"
                     / f"cutoff_{COLDSTART_CUTOFF}" / x_key
@@ -370,7 +377,63 @@ def generate_coldstart_charts(df: pd.DataFrame, out_base: Path, palette: dict) -
     return index
 
 
-# ── Group 3: gini ─────────────────────────────────────────────────────────────
+# ── Group 3: coldstart_pop1 ───────────────────────────────────────────────────
+
+def generate_coldstart_pop1_charts(df: pd.DataFrame, out_base: Path, palette: dict) -> list[dict]:
+    """
+    Filter:  strategy=random, cutoff=20
+    X-axis:  uss
+    Y-axes:  COLD_POP1_METRICS (Recall_pop1, nDCG_pop1)
+    Output:  {ds}/coldstart_pop1/cutoff_20/uss/{metric}_vs_uss.png
+    Per dataset: 2 charts
+    """
+    CUTOFF  = GROUP_CUTOFF
+    X_COL   = "uss"
+    X_LABEL = "USS"
+    index   = []
+    for ds in sorted(df["dataset"].unique()):
+        sub_c = df[
+            df["dataset"].eq(ds)
+            & df["strategy"].eq("random")
+            & df["cutoff"].eq(CUTOFF)
+        ].copy()
+        if sub_c.empty:
+            continue
+        ds_label = _fmt_dataset(ds)
+        assert_no_duplicates(sub_c, ["experiment", "series_label", "cutoff"])
+        labels = sorted_series_labels(sub_c["series_label"].unique().tolist())
+        mixed  = check_mixed_frameworks(sub_c, f"coldstart_pop1/{ds}")
+
+        for y_metric in COLD_POP1_METRICS:
+            out_path = (
+                out_base / ds / "coldstart_pop1"
+                / f"cutoff_{CUTOFF}" / "uss"
+                / f"{_metric_filename(y_metric)}_vs_uss.png"
+            )
+            title  = f"{ds_label} cold-start pop1: {y_metric}@{CUTOFF} vs {X_LABEL}"
+            result = plot_single_metric_chart(
+                sub=sub_c, x_col=X_COL, y_col=y_metric,
+                title=title, x_label=X_LABEL, y_label=y_metric,
+                palette=palette, out_path=out_path, labels=labels,
+            )
+            w = MIXED_FW_NOTE if mixed and result.get("status") == "ok" else ""
+            index.append({
+                "dataset":     ds,
+                "chart_group": "coldstart_pop1",
+                "strategy":    "random",
+                "cutoff":      CUTOFF,
+                "x_metric":   "uss",
+                "y_metric":   y_metric,
+                "gini_type":  "",
+                "output_path": result.get("output_path", ""),
+                "status":     result.get("status", "skip"),
+                "reason":     result.get("reason", ""),
+                "warning":    w,
+            })
+    return index
+
+
+# ── Group 4 (old 3): gini ─────────────────────────────────────────────────────
 
 def generate_gini_charts(
     df: pd.DataFrame, out_base: Path, palette: dict, gini_keep_frac: float
@@ -479,6 +542,177 @@ def generate_gini_charts(
     return index
 
 
+# ── Group 4: beyond_accuracy ──────────────────────────────────────────────────
+
+def generate_beyond_accuracy_charts(df: pd.DataFrame, out_base: Path, palette: dict) -> list[dict]:
+    """
+    Filter:  strategy=random, cutoff=20
+    X-axes:  oss (oss_pct), uss, iss
+    Y-axes:  BEYOND_ACCURACY_METRICS (4)
+    Output:  {ds}/beyond_accuracy/cutoff_20/{x_key}/{metric}_vs_{x_key}.png
+    Per dataset: 3 x 4 = 12 charts
+    """
+    CUTOFF = GROUP_CUTOFF
+    index  = []
+    for ds in sorted(df["dataset"].unique()):
+        sub_c = df[
+            df["dataset"].eq(ds)
+            & df["strategy"].eq("random")
+            & df["cutoff"].eq(CUTOFF)
+        ].copy()
+        if sub_c.empty:
+            continue
+        ds_label = _fmt_dataset(ds)
+        assert_no_duplicates(sub_c, ["experiment", "series_label", "cutoff"])
+        labels = sorted_series_labels(sub_c["series_label"].unique().tolist())
+        mixed  = check_mixed_frameworks(sub_c, f"beyond_accuracy/{ds}")
+
+        for x_key, (x_col, x_label) in X_AXIS_MAP.items():
+            for y_metric in BEYOND_ACCURACY_METRICS:
+                out_path = (
+                    out_base / ds / "beyond_accuracy"
+                    / f"cutoff_{CUTOFF}" / x_key
+                    / f"{_metric_filename(y_metric)}_vs_{x_key}.png"
+                )
+                title  = f"{ds_label} beyond-accuracy: {y_metric}@{CUTOFF} vs {x_label}"
+                result = plot_single_metric_chart(
+                    sub=sub_c, x_col=x_col, y_col=y_metric,
+                    title=title, x_label=x_label, y_label=y_metric,
+                    palette=palette, out_path=out_path, labels=labels,
+                )
+                w = MIXED_FW_NOTE if mixed and result.get("status") == "ok" else ""
+                index.append({
+                    "dataset": ds, "chart_group": "beyond_accuracy",
+                    "strategy": "random", "cutoff": CUTOFF,
+                    "x_metric": x_key, "y_metric": y_metric,
+                    "gini_type": "",
+                    "output_path": result.get("output_path", ""),
+                    "status": result.get("status", "skip"),
+                    "reason": result.get("reason", ""),
+                    "warning": w,
+                })
+    return index
+
+
+# ── Group 5: coldstart_groups (categorical x-axis) ────────────────────────────
+
+def plot_group_chart(
+    sub: pd.DataFrame,
+    group_suffixes: list[str],
+    group_labels: list[str],
+    y_col_template: str,
+    title: str,
+    y_label: str,
+    palette: dict,
+    out_path: Path,
+    labels: list[str],
+) -> dict:
+    """Plot categorical group chart: x=group labels, one line per model.
+    y_col_template uses positional format, e.g. 'Recall_{0}' → 'Recall_pop1'."""
+    col_names  = [y_col_template.format(s) for s in group_suffixes]
+    available  = [c for c in col_names if c in sub.columns and not sub[c].isna().all()]
+    if not available:
+        return {"status": "skip", "reason": f"No group columns found: {col_names}"}
+
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    ax.set_title(title, fontsize=10)
+    ax.set_xlabel("Group")
+    ax.set_ylabel(y_label)
+    _light_grid(ax)
+
+    x_pos      = list(range(len(group_suffixes)))
+    plotted_any = False
+    for i, label in enumerate(labels):
+        lsub = sub[sub["series_label"] == label]
+        if lsub.empty:
+            continue
+        row = lsub.iloc[0]
+        y_vals = [
+            float(row[c]) if (c in sub.columns and pd.notna(row.get(c))) else None
+            for c in col_names
+        ]
+        xp = [x_pos[j] for j, v in enumerate(y_vals) if v is not None]
+        yp = [v for v in y_vals if v is not None]
+        if not xp:
+            warnings.warn(f"[{title}] '{label}' has no group data — skipped", stacklevel=2)
+            continue
+        color = palette.get(label, _BASE_COLORS[i % len(_BASE_COLORS)])
+        ax.plot(
+            xp, yp, label=label, color=color,
+            linestyle=_LINESTYLES[i % len(_LINESTYLES)],
+            marker=_MARKERS[i % len(_MARKERS)],
+            linewidth=1.5, markersize=5,
+        )
+        plotted_any = True
+
+    if not plotted_any:
+        plt.close(fig)
+        return {"status": "skip", "reason": "no plottable data"}
+
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(group_labels, fontsize=8)
+    ax.set_ylim(bottom=0)
+    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:.3f}"))
+    ax.legend(loc="best", framealpha=0.9, fontsize=8)
+    fig.tight_layout()
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=SAVE_DPI, bbox_inches="tight")
+    plt.close(fig)
+    return {"status": "ok", "output_path": display_path(out_path)}
+
+
+def generate_coldstart_groups_charts(df: pd.DataFrame, out_base: Path, palette: dict) -> list[dict]:
+    """
+    Per-experiment charts showing model performance across popularity/user groups.
+    X-axis: categorical groups; lines: models; cutoff=20 only.
+    Output: {ds}/coldstart_groups/popularity/{experiment}/recall.png  (and ndcg.png)
+            {ds}/coldstart_groups/user/{experiment}/recall.png        (and ndcg.png)
+    """
+    CUTOFF = GROUP_CUTOFF
+    index  = []
+
+    for exp in sorted(df["experiment"].unique()):
+        exp_sub = df[df["experiment"].eq(exp) & df["cutoff"].eq(CUTOFF)].copy()
+        if exp_sub.empty:
+            continue
+        ds       = exp_sub["dataset"].iloc[0]
+        ds_label = _fmt_dataset(ds)
+        assert_no_duplicates(exp_sub, ["series_label", "cutoff"])
+        labels = sorted_series_labels(exp_sub["series_label"].unique().tolist())
+
+        for group_type, suffixes, grp_labels, group_name in [
+            ("popularity", POP_GROUP_SUFFIXES, POP_GROUP_LABELS, "Popularity"),
+            ("user",       USER_GROUP_SUFFIXES, USER_GROUP_LABELS, "User"),
+        ]:
+            for y_prefix, y_label in [("Recall", f"Recall@{CUTOFF}"), ("nDCG", f"nDCG@{CUTOFF}")]:
+                tmpl     = f"{y_prefix}_{{0}}"
+                out_path = (
+                    out_base / ds / "coldstart_groups" / group_type / exp
+                    / f"{y_prefix.lower()}.png"
+                )
+                title = (
+                    f"{ds_label} {exp}: {group_name} groups — {y_label}"
+                )
+                result = plot_group_chart(
+                    sub=exp_sub, group_suffixes=suffixes, group_labels=grp_labels,
+                    y_col_template=tmpl, title=title, y_label=y_label,
+                    palette=palette, out_path=out_path, labels=labels,
+                )
+                strat = exp_sub["strategy"].iloc[0] if "strategy" in exp_sub.columns else ""
+                index.append({
+                    "dataset": ds, "chart_group": f"coldstart_{group_type}",
+                    "strategy": strat, "cutoff": CUTOFF,
+                    "x_metric": group_type, "y_metric": f"{y_prefix}@{CUTOFF}",
+                    "gini_type": "",
+                    "output_path": result.get("output_path", ""),
+                    "status": result.get("status", "skip"),
+                    "reason": result.get("reason", ""),
+                    "warning": "",
+                })
+    return index
+
+
 # ── Outputs ───────────────────────────────────────────────────────────────────
 
 _INDEX_FIELDS = [
@@ -533,7 +767,7 @@ def write_generation_log(index: list[dict], out_base: Path, input_path: Path):
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="Plot performance charts (3 groups: random, coldstart_u1, gini)"
+        description="Plot performance charts (5 groups: random, coldstart_u1, gini, beyond_accuracy, coldstart_groups)"
     )
     p.add_argument("--input",          default=str(DEFAULT_INPUT))
     p.add_argument("--output-dir",     default=str(DEFAULT_OUTDIR))
@@ -570,10 +804,19 @@ def main():
     print("Generating coldstart_u1 charts ...")
     index_cold = generate_coldstart_charts(df, out_base, palette)
 
+    print("Generating coldstart_pop1 charts ...")
+    index_pop1 = generate_coldstart_pop1_charts(df, out_base, palette)
+
     print(f"Generating gini charts (keep_frac={args.gini_keep_frac}) ...")
     index_gini = generate_gini_charts(df, out_base, palette, gini_keep_frac=args.gini_keep_frac)
 
-    index = index_random + index_cold + index_gini
+    print("Generating beyond-accuracy charts ...")
+    index_beyond = generate_beyond_accuracy_charts(df, out_base, palette)
+
+    print("Generating coldstart group charts ...")
+    index_groups = generate_coldstart_groups_charts(df, out_base, palette)
+
+    index = index_random + index_cold + index_pop1 + index_gini + index_beyond + index_groups
 
     ok   = sum(1 for r in index if r.get("status") == "ok")
     skip = sum(1 for r in index if r.get("status") == "skip")

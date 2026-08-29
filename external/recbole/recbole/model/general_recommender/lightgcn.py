@@ -108,7 +108,11 @@ class LightGCN(GeneralRecommender):
                 )
             )
         )
-        A._update(data_dict)
+        if hasattr(A, "_update"):
+            A._update(data_dict)
+        else:
+            for (row, col), value in data_dict.items():
+                A[row, col] = value
         # norm adj matrix
         sumArr = (A > 0).sum(axis=1)
         # add epsilon to avoid divide by zero Warning

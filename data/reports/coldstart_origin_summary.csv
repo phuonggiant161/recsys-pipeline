@@ -23,8 +23,12 @@ hm,hm_random_keep0.05,random_thinning_train_only,0.05,user,0,4306,3774,8080,True
 hm,hm_random_keep0.05,random_thinning_train_only,0.05,item,6,1334,1393,2733,True,PASS
 hm,hm_random_keep0.1,random_thinning_train_only,0.1,user,0,538,1749,2287,True,PASS
 hm,hm_random_keep0.1,random_thinning_train_only,0.1,item,6,224,446,675,False,FAIL
+hm,hm_random_keep0.3,random_thinning_train_only,0.3,user,0,1,3,4,True,PASS
+hm,hm_random_keep0.3,random_thinning_train_only,0.3,item,6,8,63,71,False,FAIL
 hm,hm_random_keep0.5,random_thinning_train_only,0.5,user,0,0,0,0,True,PASS
 hm,hm_random_keep0.5,random_thinning_train_only,0.5,item,6,2,28,30,False,FAIL
+hm,hm_random_keep0.6,random_thinning_train_only,0.6,user,0,0,0,0,True,PASS
+hm,hm_random_keep0.6,random_thinning_train_only,0.6,item,6,0,22,22,False,FAIL
 hm,hm_random_keep0.7,random_thinning_train_only,0.7,user,0,0,0,0,True,PASS
 hm,hm_random_keep0.7,random_thinning_train_only,0.7,item,6,0,12,12,False,FAIL
 hm,hm_random_keep0.9,random_thinning_train_only,0.9,user,0,0,0,0,True,PASS

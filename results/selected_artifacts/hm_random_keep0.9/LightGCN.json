@@ -1,0 +1,7 @@
+{
+  "framework": "recbole",
+  "dataset": "hm_random_keep0.9",
+  "model": "LightGCN",
+  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\hm_random_keep0.9\\LightGCN\\LightGCN-Aug-26-2026_21-28-05.pth",
+  "artifact_type": "checkpoint"
+}

@@ -144,6 +144,7 @@ class Trainer(AbstractTrainer):
         self.evaluator = Evaluator(config)
         self.item_tensor = None
         self.tot_item_num = None
+        self.fake_item_id = None
 
     def _build_optimizer(self, **kwargs):
         r"""Init the Optimizer
@@ -535,6 +536,8 @@ class Trainer(AbstractTrainer):
 
         scores = scores.view(-1, self.tot_item_num)
         scores[:, 0] = -np.inf
+        if self.fake_item_id is not None:
+            scores[:, self.fake_item_id] = -np.inf
         if history_index is not None:
             scores[history_index] = -np.inf
         return interaction, scores, positive_u, positive_i
@@ -598,6 +601,17 @@ class Trainer(AbstractTrainer):
             eval_func = self._neg_sample_batch_eval
         if self.config["eval_type"] == EvaluatorType.RANKING:
             self.tot_item_num = eval_data._dataset.item_num
+            fake_item_token = self.config["FAKE_ITEM_TOKEN"]
+            self.fake_item_id = (
+                eval_data._dataset.token2id(
+                    self.config["ITEM_ID_FIELD"], fake_item_token
+                )
+                if fake_item_token is not None
+                and fake_item_token in eval_data._dataset.field2token_id[
+                    self.config["ITEM_ID_FIELD"]
+                ]
+                else None
+            )
 
         iter_data = (
             tqdm(

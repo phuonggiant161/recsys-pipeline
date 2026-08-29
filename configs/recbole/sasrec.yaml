@@ -1,0 +1,49 @@
+# dataset fields
+USER_ID_FIELD: user_id
+ITEM_ID_FIELD: item_id
+alias_of_item_id: [item_id_list]
+#RATING_FIELD: rating
+TIME_FIELD: timestamp
+
+# History-only token used for users' first interaction. It is masked from ranking.
+FAKE_ITEM_TOKEN: __FAKE_ITEM__
+
+load_col:
+  inter: [user_id, item_id, item_id_list, timestamp]
+
+benchmark_filename:
+  - train
+  - valid
+  - test
+
+# sequential settings
+MAX_ITEM_LIST_LENGTH: 50
+
+# model
+hidden_size: 64
+inner_size: 256
+n_layers: 2
+n_heads: 2
+
+hidden_dropout_prob: 0.2
+attn_dropout_prob: 0.2
+
+loss_type: CE
+train_neg_sample_args: ~
+
+# training
+epochs: 100
+train_batch_size: 2048
+learning_rate: 0.001
+
+# evaluation
+metrics: [Recall, NDCG, Hit, Precision]
+topk: [10,20,50]
+valid_metric: NDCG@10
+
+eval_args:
+  order: TO
+  group_by: user
+  mode: full
+
+stopping_step: 10

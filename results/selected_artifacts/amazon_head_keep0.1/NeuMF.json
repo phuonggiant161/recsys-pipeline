@@ -2,6 +2,6 @@
   "framework": "recbole",
   "dataset": "amazon_head_keep0.1",
   "model": "NeuMF",
-  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\amazon_head_keep0.1\\NeuMF\\NeuMF-Aug-21-2026_18-58-53.pth",
+  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\amazon_head_keep0.1\\NeuMF\\NeuMF-Aug-29-2026_20-00-14.pth",
   "artifact_type": "checkpoint"
 }
