@@ -36,8 +36,8 @@ COLD_U1_METRICS  = ["Recall_u1", "nDCG_u1"]
 # Elliot native → canonical:  ARP→AveragePopularity, APLT→TailPercentage (rename at collect time)
 # RecBole source: *_evaluation.tsv written by external/recbole/run_evaluation.py (already canonical)
 BEYOND_ACCURACY_METRICS = ["ItemCoverage", "AveragePopularity", "Gini", "TailPercentage"]
-POP_GROUP_SUFFIXES  = ["pop1", "pop2_5", "pop6_10", "pop11_20", "pop20plus"]
-USER_GROUP_SUFFIXES = ["u1", "u2_5", "u6_10", "u11_20", "u20plus"]
+POP_GROUP_SUFFIXES  = ["pop1", "pop2_5", "pop6_10", "pop11_20", "pop21_40", "pop41plus"]
+USER_GROUP_SUFFIXES = ["u1", "u2_5", "u6_10", "u11_20", "u21_40", "u41plus"]
 POP_METRICS  = [f"Recall_{s}" for s in POP_GROUP_SUFFIXES] + [f"nDCG_{s}" for s in POP_GROUP_SUFFIXES]
 USER_METRICS = [f"Recall_{s}" for s in USER_GROUP_SUFFIXES] + [f"nDCG_{s}" for s in USER_GROUP_SUFFIXES]
 # Full metric set carried through build_long / check_and_dedup / build_wide

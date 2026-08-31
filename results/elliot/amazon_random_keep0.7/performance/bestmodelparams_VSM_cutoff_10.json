@@ -1,16 +1,14 @@
 [
     {
-        "default_validation_metric": "Precision",
+        "default_validation_metric": "SEntropy",
         "default_validation_cutoff": 10,
         "rel_threshold": 0
     },
     {
-        "meta": {
-            "save_recs": true
-        },
+        "meta": {},
         "recommender": "VSM_sim=cosine_up=tfidf_ip=tfidf_load=ItemAttributes",
         "configuration": {
-            "similarity": "cosine",
+            "path": "D:\\recsys-pipeline\\results\\elliot\\amazon_random_keep0.7\\recs\\VSM_sim=cosine_up=tfidf_ip=tfidf_load=ItemAttributes.tsv",
             "name": "VSM_sim=cosine_up=tfidf_ip=tfidf_load=ItemAttributes"
         }
     }

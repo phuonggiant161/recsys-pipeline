@@ -1,6 +1,6 @@
 Input: D:\recsys-pipeline\results\_summary\performance_summary.xlsx
 Output directory: D:\recsys-pipeline\results\figures\performance_charts
-Total: 254 | OK: 254 | Skipped: 0 | Error: 0
+Total: 276 | OK: 276 | Skipped: 0 | Error: 0
 
 --- Details ---
 [ok   ] amazon       random         cut=10  oss        Precision       Note: models are from different evaluation frameworks -- verify evaluator equivalence before cross-model comparison.
@@ -257,3 +257,25 @@ Total: 254 | OK: 254 | Skipped: 0 | Error: 0
 [ok   ] hm           coldstart_popularity cut=20  popularity nDCG@20         
 [ok   ] hm           coldstart_user cut=20  user       Recall@20       
 [ok   ] hm           coldstart_user cut=20  user       nDCG@20         
+[ok   ] amazon       coldstart_popularity_uss cut=20  uss        nDCG_pop1       Note: models are from different evaluation frameworks -- verify evaluator equivalence before cross-model comparison.
+[ok   ] amazon       coldstart_popularity_uss cut=20  uss        nDCG_pop2_5     Note: models are from different evaluation frameworks -- verify evaluator equivalence before cross-model comparison.
+[ok   ] hm           coldstart_popularity_uss cut=20  uss        nDCG_pop1       Note: models are from different evaluation frameworks -- verify evaluator equivalence before cross-model comparison.
+[ok   ] hm           coldstart_popularity_uss cut=20  uss        nDCG_pop2_5     Note: models are from different evaluation frameworks -- verify evaluator equivalence before cross-model comparison.
+[ok   ] amazon       coldstart_popularity_item_gini cut=20  item_gini  nDCG_pop1       Note: models are from different evaluation frameworks -- verify evaluator equivalence before cross-model comparison.
+[ok   ] amazon       coldstart_popularity_item_gini cut=20  item_gini  nDCG_pop2_5     Note: models are from different evaluation frameworks -- verify evaluator equivalence before cross-model comparison.
+[ok   ] hm           coldstart_popularity_item_gini cut=20  item_gini  nDCG_pop1       Note: models are from different evaluation frameworks -- verify evaluator equivalence before cross-model comparison.
+[ok   ] hm           coldstart_popularity_item_gini cut=20  item_gini  nDCG_pop2_5     Note: models are from different evaluation frameworks -- verify evaluator equivalence before cross-model comparison.
+[ok   ] amazon       coldstart_user_uss cut=20  uss        nDCG_u2_5       Note: models are from different evaluation frameworks -- verify evaluator equivalence before cross-model comparison.
+[ok   ] hm           coldstart_user_uss cut=20  uss        nDCG_u2_5       Note: models are from different evaluation frameworks -- verify evaluator equivalence before cross-model comparison.
+[ok   ] amazon       item_group_distribution cut=0   experiment item_group_pct  
+[ok   ] amazon       user_group_distribution cut=0   experiment user_group_pct  
+[ok   ] amazon       item_group_distribution cut=0   experiment item_group_pct  
+[ok   ] amazon       user_group_distribution cut=0   experiment user_group_pct  
+[ok   ] amazon       item_group_distribution cut=0   experiment item_group_pct  
+[ok   ] amazon       user_group_distribution cut=0   experiment user_group_pct  
+[ok   ] hm           item_group_distribution cut=0   experiment item_group_pct  
+[ok   ] hm           user_group_distribution cut=0   experiment user_group_pct  
+[ok   ] hm           item_group_distribution cut=0   experiment item_group_pct  
+[ok   ] hm           user_group_distribution cut=0   experiment user_group_pct  
+[ok   ] hm           item_group_distribution cut=0   experiment item_group_pct  
+[ok   ] hm           user_group_distribution cut=0   experiment user_group_pct  

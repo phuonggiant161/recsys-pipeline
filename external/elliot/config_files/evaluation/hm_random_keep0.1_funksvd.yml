@@ -8,32 +8,41 @@ experiment:
   top_k: 50
   evaluation:
     cutoffs:
-    - 30
+    - 10
+    - 20
+    - 50
     simple_metrics:
     - SEntropy
     - Gini
+    - ItemCoverage
+    - ARP
+    - APLT
     - Recall
     - nDCG
     - Recall_pop1
     - Recall_pop2_5
     - Recall_pop6_10
     - Recall_pop11_20
-    - Recall_pop20plus
+    - Recall_pop21_40
+    - Recall_pop41plus
     - nDCG_pop1
     - nDCG_pop2_5
     - nDCG_pop6_10
     - nDCG_pop11_20
-    - nDCG_pop20plus
+    - nDCG_pop21_40
+    - nDCG_pop41plus
     - Recall_u1
     - Recall_u2_5
     - Recall_u6_10
     - Recall_u11_20
-    - Recall_u20plus
+    - Recall_u21_40
+    - Recall_u41plus
     - nDCG_u1
     - nDCG_u2_5
     - nDCG_u6_10
     - nDCG_u11_20
-    - nDCG_u20plus
+    - nDCG_u21_40
+    - nDCG_u41plus
   path_output_rec_performance: results/elliot/hm_random_keep0.1/performance/
   path_log_folder: ../../../../results/elliot/hm_random_keep0.1/logs/
   gpu: 0

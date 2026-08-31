@@ -1,16 +1,27 @@
 """
 Plot performance charts from the unified summary workbook.
-6 analysis groups: random, coldstart_u1, coldstart_pop1, gini, beyond_accuracy, coldstart_groups.
+
+Chart groups:
+  random               — main metrics vs OSS/USS/ISS across random keep_fracs
+  coldstart_u1         — Recall/nDCG_u1 vs OSS/USS/ISS
+  coldstart_pop1       — Recall/nDCG_pop1 vs USS
+  gini                 — main metrics vs item/user Gini
+  beyond_accuracy      — coverage/popularity/diversity metrics
+  coldstart_groups     — per-experiment categorical group charts +
+                         popularity/user cross-variant charts (USS, ItemGini)
+  group_distribution   — 100%-stacked item-popularity and user-activity bars
 
 Usage:
     python scripts/plot_performance_charts.py
     python scripts/plot_performance_charts.py --input results/_summary/performance_summary.xlsx
     python scripts/plot_performance_charts.py --output-dir results/figures/performance_charts
     python scripts/plot_performance_charts.py --gini-keep-frac 0.1
+    python scripts/plot_performance_charts.py --processed-dir data/processed
 """
 
 import argparse
 import csv
+import re
 import sys
 import warnings
 from pathlib import Path
@@ -58,10 +69,10 @@ MAIN_METRICS            = ["Precision", "Recall", "nDCG", "MAP", "MRR"]
 COLD_U1_METRICS         = ["Recall_u1", "nDCG_u1"]
 COLD_POP1_METRICS       = ["Recall_pop1", "nDCG_pop1"]
 BEYOND_ACCURACY_METRICS = ["ItemCoverage", "AveragePopularity", "Gini", "TailPercentage"]
-POP_GROUP_SUFFIXES      = ["pop1", "pop2_5", "pop6_10", "pop11_20", "pop20plus"]
-USER_GROUP_SUFFIXES     = ["u1", "u2_5", "u6_10", "u11_20", "u20plus"]
-POP_GROUP_LABELS        = ["Pop 1", "Pop 2-5", "Pop 6-10", "Pop 11-20", "Pop 20+"]
-USER_GROUP_LABELS       = ["U 1", "U 2-5", "U 6-10", "U 11-20", "U 20+"]
+POP_GROUP_SUFFIXES      = ["pop1", "pop2_5", "pop6_10", "pop11_20", "pop21_40", "pop41plus"]
+USER_GROUP_SUFFIXES     = ["u1", "u2_5", "u6_10", "u11_20", "u21_40", "u41plus"]
+POP_GROUP_LABELS        = ["Pop 1", "Pop 2-5", "Pop 6-10", "Pop 11-20", "Pop 21-40", "Pop 41+"]
+USER_GROUP_LABELS       = ["U 1", "U 2-5", "U 6-10", "U 11-20", "U 21-40", "U 41+"]
 RANDOM_CUTOFFS          = [10, 20, 50]
 GROUP_CUTOFF            = 20
 
@@ -81,6 +92,42 @@ MIXED_FW_NOTE = (
     "verify evaluator equivalence before cross-model comparison."
 )
 
+PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
+
+# Pattern to parse experiment dir names for distribution charts
+_EXP_DIST_PAT = re.compile(
+    r"^(?P<dataset>.+?)_(?P<strategy>random|head|tail)_keep(?P<keep_frac>\d+(?:\.\d+)?)$"
+)
+
+# Popularity group bins (matches pipeline group spec)
+_DIST_POP_BINS = [
+    ("pop1",      lambda c: c == 1),
+    ("pop2_5",    lambda c: 2 <= c <= 5),
+    ("pop6_10",   lambda c: 6 <= c <= 10),
+    ("pop11_20",  lambda c: 11 <= c <= 20),
+    ("pop21_40",  lambda c: 21 <= c <= 40),
+    ("pop41plus", lambda c: c >= 41),
+]
+
+# User activity group bins (matches pipeline group spec)
+_DIST_USER_BINS = [
+    ("u1",       lambda c: c == 1),
+    ("u2_5",     lambda c: 2 <= c <= 5),
+    ("u6_10",    lambda c: 6 <= c <= 10),
+    ("u11_20",   lambda c: 11 <= c <= 20),
+    ("u21_40",   lambda c: 21 <= c <= 40),
+    ("u41plus",  lambda c: c >= 41),
+]
+
+# Sequential color palette for stacked bars (dark-red → orange → gold → green → blue → purple)
+_DIST_GROUP_COLORS = [
+    "#d62728", "#ff7f0e", "#e6c200",
+    "#2ca02c", "#1f77b4", "#9467bd",
+]
+
+# Per-run cache: experiment name → distribution dict or None
+_TRAIN_DIST_CACHE: dict = {}
+
 # ── Path helper ───────────────────────────────────────────────────────────────
 
 def display_path(path: Path) -> str:
@@ -88,6 +135,30 @@ def display_path(path: Path) -> str:
         return str(path.relative_to(PROJECT_ROOT))
     except ValueError:
         return str(path.resolve())
+
+
+# ── Stale PNG cleanup ─────────────────────────────────────────────────────────
+
+def _clean_png_subtree(directory: Path) -> int:
+    """Remove all *.png files recursively under *directory*.
+
+    Called at the start of each chart-group generator to ensure that PNGs from
+    previous runs (e.g. for metrics that have since been removed from the metric
+    list) do not linger alongside newly generated charts.
+
+    Returns the number of files removed.
+    """
+    count = 0
+    if directory.exists():
+        for png in directory.rglob("*.png"):
+            try:
+                png.unlink()
+                count += 1
+            except OSError:
+                pass
+    if count:
+        print(f"  Cleaned {count} stale PNG(s) from {display_path(directory)}")
+    return count
 
 
 # ── Dataset display name ──────────────────────────────────────────────────────
@@ -277,6 +348,7 @@ def generate_random_charts(df: pd.DataFrame, out_base: Path, palette: dict) -> l
     """
     index = []
     for ds in sorted(df["dataset"].unique()):
+        _clean_png_subtree(out_base / ds / "random")
         ds_sub = df[df["dataset"].eq(ds) & df["strategy"].eq("random")].copy()
         if ds_sub.empty:
             continue
@@ -334,6 +406,7 @@ def generate_coldstart_charts(df: pd.DataFrame, out_base: Path, palette: dict) -
     COLDSTART_CUTOFF = 20
     index = []
     for ds in sorted(df["dataset"].unique()):
+        _clean_png_subtree(out_base / ds / "coldstart_u1")
         sub_c = df[
             df["dataset"].eq(ds)
             & df["strategy"].eq("random")
@@ -392,6 +465,7 @@ def generate_coldstart_pop1_charts(df: pd.DataFrame, out_base: Path, palette: di
     X_LABEL = "USS"
     index   = []
     for ds in sorted(df["dataset"].unique()):
+        _clean_png_subtree(out_base / ds / "coldstart_pop1")
         sub_c = df[
             df["dataset"].eq(ds)
             & df["strategy"].eq("random")
@@ -449,6 +523,7 @@ def generate_gini_charts(
     GINI_STRATEGIES = ["head", "random", "tail"]
     index = []
     for ds in sorted(df["dataset"].unique()):
+        _clean_png_subtree(out_base / ds / "gini")
         ds_sub = df[
             df["dataset"].eq(ds)
             & df["strategy"].isin(GINI_STRATEGIES)
@@ -555,6 +630,7 @@ def generate_beyond_accuracy_charts(df: pd.DataFrame, out_base: Path, palette: d
     CUTOFF = GROUP_CUTOFF
     index  = []
     for ds in sorted(df["dataset"].unique()):
+        _clean_png_subtree(out_base / ds / "beyond_accuracy")
         sub_c = df[
             df["dataset"].eq(ds)
             & df["strategy"].eq("random")
@@ -591,6 +667,177 @@ def generate_beyond_accuracy_charts(df: pd.DataFrame, out_base: Path, palette: d
                     "reason": result.get("reason", ""),
                     "warning": w,
                 })
+    return index
+
+
+# ── Train-distribution helpers ─────────────────────────────────────────────────
+
+def _load_train_dist(experiment: str, processed_dir: Path) -> dict | None:
+    """Load train.tsv and compute item/user group counts.
+
+    Results are cached per experiment per run. TSV has no header: col 0 = user,
+    col 1 = item. Returns None if train.tsv does not exist.
+    """
+    if experiment in _TRAIN_DIST_CACHE:
+        return _TRAIN_DIST_CACHE[experiment]
+
+    path = processed_dir / experiment / "train.tsv"
+    if not path.exists():
+        _TRAIN_DIST_CACHE[experiment] = None
+        return None
+
+    raw = pd.read_csv(path, sep="\t", header=None, usecols=[0, 1], dtype=str)
+    item_counts = raw[1].value_counts().to_dict()
+    user_counts = raw[0].value_counts().to_dict()
+
+    def _bin_counts(counts_dict, bins):
+        return {name: sum(1 for c in counts_dict.values() if pred(c))
+                for name, pred in bins}
+
+    item_groups = _bin_counts(item_counts, _DIST_POP_BINS)
+    user_groups = _bin_counts(user_counts, _DIST_USER_BINS)
+    total_items = len(item_counts)
+    total_users = len(user_counts)
+
+    if sum(item_groups.values()) != total_items:
+        warnings.warn(
+            f"[dist/{experiment}] item group total {sum(item_groups.values())} "
+            f"!= unique items {total_items}", stacklevel=2,
+        )
+    if sum(user_groups.values()) != total_users:
+        warnings.warn(
+            f"[dist/{experiment}] user group total {sum(user_groups.values())} "
+            f"!= unique users {total_users}", stacklevel=2,
+        )
+
+    result = {
+        "item_groups": item_groups,
+        "user_groups": user_groups,
+        "total_items": total_items,
+        "total_users": total_users,
+    }
+    _TRAIN_DIST_CACHE[experiment] = result
+    return result
+
+
+def _plot_stacked_distribution(
+    x_labels: list,
+    percentages: list,
+    raw_counts: list,
+    bin_names: list,
+    bin_display_labels: list,
+    colors: list,
+    title: str,
+    y_label: str,
+    out_path: Path,
+) -> dict:
+    """100%-stacked bar chart for group distributions.
+
+    Each bar = one dataset variant; segments = group percentages.
+    Annotates segment with percentage AND raw count when >= MIN_PCT_LABEL.
+    Label format: "35.2%\\nn=3,482" (percentage on line 1, count on line 2).
+    raw_counts[i][bin_name] must correspond to the i-th x_label.
+    """
+    if not x_labels:
+        return {"status": "skip", "reason": "no experiments"}
+
+    MIN_PCT_LABEL = 8.0
+    bar_w = 0.65
+    fig_w = max(5, len(x_labels) * 1.5 + 2.5)
+    fig, ax = plt.subplots(figsize=(fig_w, 5.5))
+    ax.set_title(title, fontsize=10)
+    ax.set_xlabel("Dataset variant")
+    ax.set_ylabel(y_label)
+    _light_grid(ax)
+
+    x_pos    = list(range(len(x_labels)))
+    bottoms  = [0.0] * len(x_labels)
+
+    for bin_name, disp_label, color in zip(bin_names, bin_display_labels, colors):
+        vals  = [pct.get(bin_name, 0.0) for pct in percentages]
+        rects = ax.bar(x_pos, vals, bottom=bottoms, color=color,
+                       label=disp_label, width=bar_w)
+        for i, (rect, val, bot_val) in enumerate(zip(rects, vals, bottoms)):
+            if val >= MIN_PCT_LABEL:
+                cx = rect.get_x() + rect.get_width() / 2
+                cy = bot_val + val / 2
+                count = raw_counts[i].get(bin_name, 0)
+                label_text = f"{val:.1f}%\nn={count:,}"
+                ax.text(cx, cy, label_text, ha="center", va="center",
+                        fontsize=6.5, color="white", fontweight="bold",
+                        linespacing=1.3)
+        bottoms = [b + v for b, v in zip(bottoms, vals)]
+
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(x_labels, fontsize=8, rotation=20, ha="right")
+    ax.set_ylim(0, 108)
+    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{v:.0f}%"))
+    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1), fontsize=8, framealpha=0.9)
+    fig.tight_layout()
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=SAVE_DPI, bbox_inches="tight")
+    plt.close(fig)
+    return {"status": "ok", "output_path": display_path(out_path)}
+
+
+# ── Cross-variant charts: nDCG group vs x (USS or ItemGini) ───────────────────
+
+def _generate_cross_variant_charts(
+    df: pd.DataFrame,
+    out_base: Path,
+    palette: dict,
+    cutoff: int,
+    y_metrics: list,
+    x_col: str,
+    x_label: str,
+    parent_folder: str,
+    chart_group: str,
+) -> list:
+    """Cross-variant scatter/line charts: strategy=random, x=x_col, y=y_metric.
+
+    Output: {ds}/coldstart_groups/{parent_folder}/cutoff_{cutoff}/{x_col}/{y_metric_lower}_vs_{x_col}.png
+    """
+    index = []
+    for ds in sorted(df["dataset"].unique()):
+        sub = df[
+            df["dataset"].eq(ds)
+            & df["strategy"].eq("random")
+            & df["cutoff"].eq(cutoff)
+        ].copy()
+        if sub.empty:
+            continue
+        ds_label = _fmt_dataset(ds)
+        assert_no_duplicates(sub, ["experiment", "series_label", "cutoff"])
+        labels = sorted_series_labels(sub["series_label"].unique().tolist())
+        mixed  = check_mixed_frameworks(sub, f"coldstart_groups/{ds}/{parent_folder}/{x_col}")
+
+        for y_metric in y_metrics:
+            out_path = (
+                out_base / ds / "coldstart_groups" / parent_folder
+                / f"cutoff_{cutoff}" / x_col
+                / f"{_metric_filename(y_metric)}_vs_{x_col}.png"
+            )
+            title  = f"{ds_label}: {y_metric}@{cutoff} vs {x_label}"
+            result = plot_single_metric_chart(
+                sub=sub, x_col=x_col, y_col=y_metric,
+                title=title, x_label=x_label, y_label=y_metric,
+                palette=palette, out_path=out_path, labels=labels,
+            )
+            w = MIXED_FW_NOTE if mixed and result.get("status") == "ok" else ""
+            index.append({
+                "dataset":     ds,
+                "chart_group": chart_group,
+                "strategy":    "random",
+                "cutoff":      cutoff,
+                "x_metric":    x_col,
+                "y_metric":    y_metric,
+                "gini_type":   "",
+                "output_path": result.get("output_path", ""),
+                "status":      result.get("status", "skip"),
+                "reason":      result.get("reason", ""),
+                "warning":     w,
+            })
     return index
 
 
@@ -672,6 +919,10 @@ def generate_coldstart_groups_charts(df: pd.DataFrame, out_base: Path, palette: 
     CUTOFF = GROUP_CUTOFF
     index  = []
 
+    # Clean per-dataset coldstart_groups subtrees before regenerating.
+    for ds in sorted(df["dataset"].unique()):
+        _clean_png_subtree(out_base / ds / "coldstart_groups")
+
     for exp in sorted(df["experiment"].unique()):
         exp_sub = df[df["experiment"].eq(exp) & df["cutoff"].eq(CUTOFF)].copy()
         if exp_sub.empty:
@@ -710,7 +961,244 @@ def generate_coldstart_groups_charts(df: pd.DataFrame, out_base: Path, palette: 
                     "reason": result.get("reason", ""),
                     "warning": "",
                 })
+
+    # Steps 3-5: cross-variant charts (all run under the same coldstart_groups cleanup)
+    index.extend(_generate_cross_variant_charts(
+        df, out_base, palette, cutoff=CUTOFF,
+        y_metrics=["nDCG_pop1", "nDCG_pop2_5"],
+        x_col="uss", x_label="AIU (USS)",
+        parent_folder="popularity",
+        chart_group="coldstart_popularity_uss",
+    ))
+
+    index.extend(_generate_cross_variant_charts(
+        df, out_base, palette, cutoff=CUTOFF,
+        y_metrics=["nDCG_pop1", "nDCG_pop2_5"],
+        x_col="item_gini", x_label="Item Gini",
+        parent_folder="popularity",
+        chart_group="coldstart_popularity_item_gini",
+    ))
+
+    index.extend(_generate_cross_variant_charts(
+        df, out_base, palette, cutoff=CUTOFF,
+        y_metrics=["nDCG_u2_5"],
+        x_col="uss", x_label="AIU (USS)",
+        parent_folder="user",
+        chart_group="coldstart_user_uss",
+    ))
+
     return index
+
+
+# ── Group distribution charts ─────────────────────────────────────────────────
+
+def generate_group_distribution_charts(out_base: Path, processed_dir: Path) -> list:
+    """
+    Discover experiment dirs under processed_dir, load train.tsv (cached), and
+    plot 100%-stacked bar charts of item-popularity and user-activity groups.
+
+    One chart per dataset × strategy × group_type.
+
+    Output:
+        {ds}/group_distribution/item_popularity/item_group_percentage_{strategy}.png
+        {ds}/group_distribution/user_activity/user_group_percentage_{strategy}.png
+
+    Experiments are discovered dynamically — no keep_fracs are hardcoded.
+    """
+    STRATEGIES = ["random", "head", "tail"]
+
+    # Discover experiments from processed_dir
+    all_exps: list = []
+    for d in sorted(processed_dir.iterdir()):
+        if not d.is_dir() or not (d / "train.tsv").exists():
+            continue
+        m = _EXP_DIST_PAT.match(d.name)
+        if m:
+            all_exps.append({
+                "experiment": d.name,
+                "dataset":    m.group("dataset"),
+                "strategy":   m.group("strategy"),
+                "keep_frac":  float(m.group("keep_frac")),
+            })
+
+    if not all_exps:
+        print("  [WARN] No suitable experiment dirs found for distribution charts")
+        return []
+
+    datasets = sorted({e["dataset"] for e in all_exps})
+    index: list = []
+
+    for ds in datasets:
+        _clean_png_subtree(out_base / ds / "group_distribution")
+        ds_label = _fmt_dataset(ds)
+
+        for strategy in STRATEGIES:
+            exps = sorted(
+                [e for e in all_exps if e["dataset"] == ds and e["strategy"] == strategy],
+                key=lambda e: e["keep_frac"],
+            )
+            if not exps:
+                continue
+
+            # Load distributions (cached)
+            dist_data = []
+            for e in exps:
+                d = _load_train_dist(e["experiment"], processed_dir)
+                if d is None:
+                    warnings.warn(
+                        f"[dist] train.tsv missing for {e['experiment']}, skipped",
+                        stacklevel=2,
+                    )
+                dist_data.append(d)
+
+            valid_mask = [d is not None for d in dist_data]
+            x_labels   = [
+                f"keep {e['keep_frac']}" for e, ok in zip(exps, valid_mask) if ok
+            ]
+            if not x_labels:
+                continue
+            valid_dist = [d for d, ok in zip(dist_data, valid_mask) if ok]
+
+            # ── Item popularity chart ──────────────────────────────────────
+            pct_items   = []
+            count_items = []
+            for dist in valid_dist:
+                total = dist["total_items"]
+                pct_items.append({
+                    k: (v / total * 100) if total > 0 else 0.0
+                    for k, v in dist["item_groups"].items()
+                })
+                count_items.append(dist["item_groups"])
+
+            out_path = (
+                out_base / ds / "group_distribution" / "item_popularity"
+                / f"item_group_percentage_{strategy}.png"
+            )
+            result = _plot_stacked_distribution(
+                x_labels=x_labels,
+                percentages=pct_items,
+                raw_counts=count_items,
+                bin_names=[b[0] for b in _DIST_POP_BINS],
+                bin_display_labels=POP_GROUP_LABELS,
+                colors=_DIST_GROUP_COLORS,
+                title=f"{ds_label} {strategy}: item popularity group distribution",
+                y_label="Percentage of items (%)",
+                out_path=out_path,
+            )
+            index.append({
+                "dataset":     ds,
+                "chart_group": "item_group_distribution",
+                "strategy":    strategy,
+                "cutoff":      0,
+                "x_metric":    "experiment",
+                "y_metric":    "item_group_pct",
+                "gini_type":   "",
+                "output_path": result.get("output_path", ""),
+                "status":      result.get("status", "skip"),
+                "reason":      result.get("reason", ""),
+                "warning":     "",
+            })
+
+            # ── User activity chart ────────────────────────────────────────
+            pct_users   = []
+            count_users = []
+            for dist in valid_dist:
+                total = dist["total_users"]
+                pct_users.append({
+                    k: (v / total * 100) if total > 0 else 0.0
+                    for k, v in dist["user_groups"].items()
+                })
+                count_users.append(dist["user_groups"])
+
+            out_path = (
+                out_base / ds / "group_distribution" / "user_activity"
+                / f"user_group_percentage_{strategy}.png"
+            )
+            result = _plot_stacked_distribution(
+                x_labels=x_labels,
+                percentages=pct_users,
+                raw_counts=count_users,
+                bin_names=[b[0] for b in _DIST_USER_BINS],
+                bin_display_labels=USER_GROUP_LABELS,
+                colors=_DIST_GROUP_COLORS,
+                title=f"{ds_label} {strategy}: user activity group distribution",
+                y_label="Percentage of users (%)",
+                out_path=out_path,
+            )
+            index.append({
+                "dataset":     ds,
+                "chart_group": "user_group_distribution",
+                "strategy":    strategy,
+                "cutoff":      0,
+                "x_metric":    "experiment",
+                "y_metric":    "user_group_pct",
+                "gini_type":   "",
+                "output_path": result.get("output_path", ""),
+                "status":      result.get("status", "skip"),
+                "reason":      result.get("reason", ""),
+                "warning":     "",
+            })
+
+    return index
+
+
+def write_distribution_csv(out_base: Path, processed_dir: Path) -> None:
+    """Write group-distribution counts and percentages to a CSV file.
+
+    Columns: dataset, experiment, strategy, keep_frac, group_type, group, count, percentage.
+    Covers all experiments discovered by _EXP_DIST_PAT (same set as the charts).
+    Small-group counts that are not labeled on the chart remain inspectable here.
+    """
+    csv_path = out_base / "group_distribution_counts.csv"
+    rows = []
+
+    for d in sorted(processed_dir.iterdir()):
+        if not d.is_dir():
+            continue
+        m = _EXP_DIST_PAT.match(d.name)
+        if not m:
+            continue
+        exp      = d.name
+        dataset  = m.group("dataset")
+        strategy = m.group("strategy")
+        kf       = float(m.group("keep_frac"))
+
+        dist = _load_train_dist(exp, processed_dir)
+        if dist is None:
+            continue
+
+        total_items = dist["total_items"]
+        total_users = dist["total_users"]
+
+        for bin_name, _ in _DIST_POP_BINS:
+            count = dist["item_groups"].get(bin_name, 0)
+            pct   = (count / total_items * 100) if total_items > 0 else 0.0
+            rows.append({
+                "dataset": dataset, "experiment": exp, "strategy": strategy,
+                "keep_frac": kf, "group_type": "item_popularity",
+                "group": bin_name, "count": count, "percentage": round(pct, 4),
+            })
+
+        for bin_name, _ in _DIST_USER_BINS:
+            count = dist["user_groups"].get(bin_name, 0)
+            pct   = (count / total_users * 100) if total_users > 0 else 0.0
+            rows.append({
+                "dataset": dataset, "experiment": exp, "strategy": strategy,
+                "keep_frac": kf, "group_type": "user_activity",
+                "group": bin_name, "count": count, "percentage": round(pct, 4),
+            })
+
+    if not rows:
+        return
+
+    fields = ["dataset", "experiment", "strategy", "keep_frac",
+              "group_type", "group", "count", "percentage"]
+    out_base.mkdir(parents=True, exist_ok=True)
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        w.writerows(rows)
+    print(f"Distribution counts CSV: {csv_path}")
 
 
 # ── Outputs ───────────────────────────────────────────────────────────────────
@@ -767,10 +1255,12 @@ def write_generation_log(index: list[dict], out_base: Path, input_path: Path):
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="Plot performance charts (5 groups: random, coldstart_u1, gini, beyond_accuracy, coldstart_groups)"
+        description="Plot performance charts (random, coldstart, gini, beyond_accuracy, coldstart_groups, group_distribution)"
     )
     p.add_argument("--input",          default=str(DEFAULT_INPUT))
     p.add_argument("--output-dir",     default=str(DEFAULT_OUTDIR))
+    p.add_argument("--processed-dir",  default=str(PROCESSED_DIR),
+                   help="Path to data/processed/ for group-distribution charts")
     p.add_argument(
         "--gini-keep-frac", type=float, default=0.1,
         help="keep_frac filter for gini group (default 0.1)",
@@ -813,10 +1303,15 @@ def main():
     print("Generating beyond-accuracy charts ...")
     index_beyond = generate_beyond_accuracy_charts(df, out_base, palette)
 
-    print("Generating coldstart group charts ...")
+    print("Generating coldstart group charts (per-experiment + cross-variant) ...")
     index_groups = generate_coldstart_groups_charts(df, out_base, palette)
 
-    index = index_random + index_cold + index_pop1 + index_gini + index_beyond + index_groups
+    print("Generating group distribution charts ...")
+    index_dist = generate_group_distribution_charts(out_base, Path(args.processed_dir))
+    write_distribution_csv(out_base, Path(args.processed_dir))
+
+    index = (index_random + index_cold + index_pop1 + index_gini
+             + index_beyond + index_groups + index_dist)
 
     ok   = sum(1 for r in index if r.get("status") == "ok")
     skip = sum(1 for r in index if r.get("status") == "skip")

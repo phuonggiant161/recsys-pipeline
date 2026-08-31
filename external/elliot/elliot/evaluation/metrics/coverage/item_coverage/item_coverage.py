@@ -39,6 +39,7 @@ class ItemCoverage(BaseMetric):
         """
         super().__init__(recommendations, config, params, eval_objects)
         self._cutoff = self._evaluation_objects.cutoff
+        self._num_items = self._evaluation_objects.num_items
 
     @staticmethod
     def name():
@@ -51,6 +52,8 @@ class ItemCoverage(BaseMetric):
     def eval(self):
         """
         Evaluation function
-        :return: the overall averaged value of Item Coverage
+        :return: fraction of catalog items that appear in at least one recommendation list (range [0, 1]).
+        Consistent with RecBole ItemCoverage = unique_recommended / num_items.
         """
-        return len({i[0] for u_r in self._recommendations.values() for i in u_r[:self._cutoff]})
+        unique_count = len({i[0] for u_r in self._recommendations.values() for i in u_r[:self._cutoff]})
+        return unique_count / self._num_items if self._num_items > 0 else 0.0

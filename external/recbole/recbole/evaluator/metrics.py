@@ -888,10 +888,10 @@ class U1MRR(TopkMetric):
 # ─────────────────────────────────────────────────────────────────────────────
 # Item-popularity group metrics
 # Bins are fixed: pop1 (=1), pop2_5 (2-5), pop6_10 (6-10), pop11_20 (11-20),
-# pop20plus (>20).  Popularity = train interaction count.
+# pop21_40 (21-40), pop41plus (>=41).  Popularity = train interaction count.
 # ─────────────────────────────────────────────────────────────────────────────
 
-_POP_GROUP_KEYS = ["pop1", "pop2_5", "pop6_10", "pop11_20", "pop20plus"]
+_POP_GROUP_KEYS = ["pop1", "pop2_5", "pop6_10", "pop11_20", "pop21_40", "pop41plus"]
 
 
 def _pop_filter(dataobject, group_name):
@@ -964,18 +964,20 @@ PopRecall_pop1      = _make_pop_recall("pop1")
 PopRecall_pop2_5    = _make_pop_recall("pop2_5")
 PopRecall_pop6_10   = _make_pop_recall("pop6_10")
 PopRecall_pop11_20  = _make_pop_recall("pop11_20")
-PopRecall_pop20plus = _make_pop_recall("pop20plus")
+PopRecall_pop21_40  = _make_pop_recall("pop21_40")
+PopRecall_pop41plus = _make_pop_recall("pop41plus")
 
 PopNDCG_pop1        = _make_pop_ndcg("pop1")
 PopNDCG_pop2_5      = _make_pop_ndcg("pop2_5")
 PopNDCG_pop6_10     = _make_pop_ndcg("pop6_10")
 PopNDCG_pop11_20    = _make_pop_ndcg("pop11_20")
-PopNDCG_pop20plus   = _make_pop_ndcg("pop20plus")
+PopNDCG_pop21_40    = _make_pop_ndcg("pop21_40")
+PopNDCG_pop41plus   = _make_pop_ndcg("pop41plus")
 
 
 # =============================================================================
 # User-activity group metrics — bins based on TRAIN interaction count per user
-# u1 (==1), u2_5 (2-5), u6_10 (6-10), u11_20 (11-20), u20plus (>20)
+# u1 (==1), u2_5 (2-5), u6_10 (6-10), u11_20 (11-20), u21_40 (21-40), u41plus (>=41)
 # Logic: filter USERS only. Full TEST GT and full Top-K are kept intact.
 # =============================================================================
 
@@ -984,9 +986,10 @@ _USER_GROUP_BINS = [
     ("u2_5",    lambda c: 2 <= c <= 5),
     ("u6_10",   lambda c: 6 <= c <= 10),
     ("u11_20",  lambda c: 11 <= c <= 20),
-    ("u20plus", lambda c: c > 20),
+    ("u21_40",  lambda c: 21 <= c <= 40),
+    ("u41plus", lambda c: c >= 41),
 ]
-_USER_GROUP_KEYS = ["u1", "u2_5", "u6_10", "u11_20", "u20plus"]
+_USER_GROUP_KEYS = ["u1", "u2_5", "u6_10", "u11_20", "u21_40", "u41plus"]
 
 
 def _user_group_filter(dataobject, group_name):
@@ -1059,13 +1062,15 @@ UserRecall_u1      = _make_user_recall("u1")
 UserRecall_u2_5    = _make_user_recall("u2_5")
 UserRecall_u6_10   = _make_user_recall("u6_10")
 UserRecall_u11_20  = _make_user_recall("u11_20")
-UserRecall_u20plus = _make_user_recall("u20plus")
+UserRecall_u21_40  = _make_user_recall("u21_40")
+UserRecall_u41plus = _make_user_recall("u41plus")
 
 UserNDCG_u1      = _make_user_ndcg("u1")
 UserNDCG_u2_5    = _make_user_ndcg("u2_5")
 UserNDCG_u6_10   = _make_user_ndcg("u6_10")
 UserNDCG_u11_20  = _make_user_ndcg("u11_20")
-UserNDCG_u20plus = _make_user_ndcg("u20plus")
+UserNDCG_u21_40  = _make_user_ndcg("u21_40")
+UserNDCG_u41plus = _make_user_ndcg("u41plus")
 
 
 def _tailitem_filter(dataobject):

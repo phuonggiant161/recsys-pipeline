@@ -49,18 +49,27 @@ class ProxyRecommender(RecMixin, BaseRecommenderModel):
         return predictions_top_k_val, predictions_top_k_test
 
     def get_single_recommendation(self, mask, k):
+        # Avoid materializing the full dense candidate mask, which can OOM on
+        # large datasets. For the current full-ranking evaluation protocol, the
+        # candidate set is catalog items not seen in TRAIN, so filtering saved
+        # recommendations against each user's sparse TRAIN item set is equivalent
+        # to the previous candidate-mask membership check.
+        cx = self._data.sp_i_train.tocsr()
+        train_items_per_user = {
+            self._data.private_users[u]: {
+                self._data.private_items[i] for i in cx.getrow(u).indices
+            }
+            for u in range(cx.shape[0])
+        }
 
-        nonzero = mask.nonzero()
-        candidate_items = {}
-        [candidate_items.setdefault(self._data.private_users[user], set()).add(self._data.private_items[item]) for user, item in zip(*nonzero)]
         recs = {}
         for u, user_recs in self._recommendations.items():
+            train_set = train_items_per_user.get(u, set())
             user_cleaned_recs = []
-            user_candidate_items = candidate_items[u]
             for p, (item, prediction) in enumerate(user_recs):
                 if p >= k:
                     break
-                if item in user_candidate_items:
+                if item not in train_set:
                     user_cleaned_recs.append((item, prediction))
             recs[u] = user_cleaned_recs
         return recs

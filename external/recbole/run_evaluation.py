@@ -23,15 +23,15 @@ from selected_artifact import read_artifact, print_artifact
 
 _pop_metrics = [
     'PopRecall_pop1',     'PopRecall_pop2_5',   'PopRecall_pop6_10',
-    'PopRecall_pop11_20', 'PopRecall_pop20plus',
+    'PopRecall_pop11_20', 'PopRecall_pop21_40', 'PopRecall_pop41plus',
     'PopNDCG_pop1',       'PopNDCG_pop2_5',     'PopNDCG_pop6_10',
-    'PopNDCG_pop11_20',   'PopNDCG_pop20plus',
+    'PopNDCG_pop11_20',   'PopNDCG_pop21_40',   'PopNDCG_pop41plus',
 ]
 _user_metrics = [
     'UserRecall_u1',     'UserRecall_u2_5',   'UserRecall_u6_10',
-    'UserRecall_u11_20', 'UserRecall_u20plus',
+    'UserRecall_u11_20', 'UserRecall_u21_40', 'UserRecall_u41plus',
     'UserNDCG_u1',       'UserNDCG_u2_5',     'UserNDCG_u6_10',
-    'UserNDCG_u11_20',   'UserNDCG_u20plus',
+    'UserNDCG_u11_20',   'UserNDCG_u21_40',   'UserNDCG_u41plus',
 ]
 _beyond_metrics = ['ItemCoverage', 'AveragePopularity', 'GiniIndex', 'TailPercentage']
 

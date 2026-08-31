@@ -33,7 +33,7 @@ def _normalize_performance_files(perf_dir: Path, model_name: str) -> None:
             continue
         cutoff   = m.group(1)
         out_path = perf_dir / f"{model_name}_cutoff_{cutoff}.tsv"
-        tsv.rename(out_path)
+        tsv.replace(out_path)
         renamed += 1
         print(f"  [eval] {tsv.name}  →  {out_path.name}")
 
@@ -43,7 +43,7 @@ def _normalize_performance_files(perf_dir: Path, model_name: str) -> None:
             continue
         cutoff   = m.group(1)
         out_path = perf_dir / f"bestmodelparams_{model_name}_cutoff_{cutoff}.json"
-        jf.rename(out_path)
+        jf.replace(out_path)
         renamed += 1
         print(f"  [eval] {jf.name}  →  {out_path.name}")
 
@@ -110,7 +110,7 @@ if isinstance(_proxy_cfg, dict) and _proxy_cfg.get('path') == 'selected_artifact
 
     # Resolve performance output dir (relative to external/elliot/ CWD)
     _perf_raw = (_cfg.get('experiment') or {}).get('path_output_rec_performance', '')
-    _perf_dir = Path(os.path.abspath(os.path.join(str(_HERE), _perf_raw))) if _perf_raw else None
+    _perf_dir = Path(os.path.abspath(os.path.join(str(_PROJ_ROOT), _perf_raw))) if _perf_raw else None
 
     # Write temp YAML in same dir as original so relative paths resolve identically
     _orig_dir = os.path.dirname(os.path.abspath(args.config))

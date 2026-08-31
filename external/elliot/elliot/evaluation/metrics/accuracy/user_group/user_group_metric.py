@@ -11,7 +11,7 @@ make_tail_metric(BaseCls)
 make_pop_recall_metric(group_name)
 make_pop_ndcg_metric(group_name)
     Popularity-group Recall/nDCG with fixed bins:
-        pop1 (count=1), pop2_5 (2-5), pop6_10 (6-10), pop11_20 (11-20), pop20plus (>20)
+        pop1 (count=1), pop2_5 (2-5), pop6_10 (6-10), pop11_20 (11-20), pop21_40 (21-40), pop41plus (>=41)
     Semantics:
     - Popularity = number of interactions in the TRAIN set.
     - Per user: denominator = |GT items in group|.
@@ -33,7 +33,8 @@ _POP_BINS = [
     ("pop2_5",    lambda c: 2 <= c <= 5),
     ("pop6_10",   lambda c: 6 <= c <= 10),
     ("pop11_20",  lambda c: 11 <= c <= 20),
-    ("pop20plus", lambda c: c > 20),
+    ("pop21_40",  lambda c: 21 <= c <= 40),
+    ("pop41plus", lambda c: c >= 41),
 ]
 
 
@@ -54,7 +55,7 @@ def _build_group_items(train_dict, group_name):
 # ──────────────────────────────────────────────────────────────────────────────
 # User-activity group metrics
 # Bins based on TRAIN interaction count per user:
-#   u1 (==1), u2_5 (2-5), u6_10 (6-10), u11_20 (11-20), u20plus (>20)
+#   u1 (==1), u2_5 (2-5), u6_10 (6-10), u11_20 (11-20), u21_40 (21-40), u41plus (>=41)
 # Logic: filter USERS only. Full GT and full Top-K are preserved.
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -63,7 +64,8 @@ _USER_BINS = {
     "u2_5":    lambda c: 2 <= c <= 5,
     "u6_10":   lambda c: 6 <= c <= 10,
     "u11_20":  lambda c: 11 <= c <= 20,
-    "u20plus": lambda c: c > 20,
+    "u21_40":  lambda c: 21 <= c <= 40,
+    "u41plus": lambda c: c >= 41,
 }
 
 

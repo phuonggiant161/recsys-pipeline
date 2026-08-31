@@ -30,15 +30,19 @@ def get_python() -> str:
     return sys.executable
 
 
-def collect_configs(filter_text: str, specific: list[str]) -> list[str]:
+EVAL_CONFIG_DIR = CONFIG_DIR / "evaluation"
+
+
+def collect_configs(filter_text: str, specific: list[str], eval_mode: bool = False) -> list[str]:
     """Return list of config stems to run, in sorted order."""
     if specific:
         return sorted(specific)
 
-    if not CONFIG_DIR.exists():
+    search_dir = EVAL_CONFIG_DIR if eval_mode else CONFIG_DIR
+    if not search_dir.exists():
         return []
 
-    stems = sorted(p.stem for p in CONFIG_DIR.glob("*.yml"))
+    stems = sorted(p.stem for p in search_dir.glob("*.yml"))
     if filter_text:
         stems = [s for s in stems if filter_text in s]
     return stems
@@ -159,26 +163,36 @@ def _normalize_performance_files(perf_dir: Path) -> None:
 
 # ── Experiment runner ─────────────────────────────────────────────────────────
 
-def run_one(stem: str, dry_run: bool) -> bool:
+def run_one(stem: str, dry_run: bool, eval_mode: bool = False) -> bool:
     """Run a single experiment. Returns True on success."""
-    cmd = [get_python(), "start_experiments.py", "--config", stem, "--config-dir", "config_files"]
+    if eval_mode:
+        config_path = EVAL_CONFIG_DIR / f"{stem}.yml"
+        # run_eval.py handles selected_artifact resolution + output normalization
+        cmd = [get_python(), str(PROJECT_ROOT / "external" / "elliot" / "run_eval.py"),
+               "-c", str(config_path)]
+        label = "EVAL"
+        cwd = PROJECT_ROOT
+    else:
+        cmd = [get_python(), "start_experiments.py", "--config", stem, "--config-dir", "config_files"]
+        label = "TRAIN"
+        cwd = ELLIOT_DIR
 
-    print(f"\n{'[DRY-RUN] ' if dry_run else ''}[TRAIN] {stem}")
-    print(f"  config : config_files/{stem}.yml")
-    print(f"  cmd    : {' '.join(cmd)}")
-    print(f"  cwd    : {ELLIOT_DIR}")
+    print(f"\n{'[DRY-RUN] ' if dry_run else ''}[{label}] {stem}")
+    print(f"  cmd    : {' '.join(str(c) for c in cmd)}")
+    print(f"  cwd    : {cwd}")
 
     if dry_run:
         return True
 
-    result = subprocess.run(cmd, cwd=ELLIOT_DIR)
+    result = subprocess.run(cmd, cwd=cwd)
     if result.returncode != 0:
         print(f"[FAILED] {stem} (exit code {result.returncode})")
         return False
 
-    perf_dir = _get_perf_dir(stem)
-    if perf_dir:
-        _normalize_performance_files(perf_dir)
+    if not eval_mode:
+        perf_dir = _get_perf_dir(stem)
+        if perf_dir:
+            _normalize_performance_files(perf_dir)
 
     print(f"[OK]    {stem}")
     return True
@@ -195,25 +209,33 @@ def main() -> None:
         help="Run all configs whose name contains TEXT",
     )
     parser.add_argument(
+        "--eval", action="store_true",
+        help="Run post-hoc evaluation configs from config_files/evaluation/ (VSM/FunkSVD via ProxyRecommender)",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true",
         help="Print commands without running",
     )
     args = parser.parse_args()
 
-    stems = collect_configs(filter_text=args.filter, specific=args.config)
+    stems = collect_configs(filter_text=args.filter, specific=args.config, eval_mode=args.eval)
 
     if not stems:
         print("No configs found.")
-        print("Generate configs first: python scripts/generate_elliot_configs.py --model ItemKNN")
+        if args.eval:
+            print("Generate eval configs first: python scripts/generate_elliot_eval_configs.py")
+        else:
+            print("Generate configs first: python scripts/generate_elliot_configs.py --model ItemKNN")
         sys.exit(1)
 
-    print(f"Mode: TRAIN | Experiments to run ({len(stems)}):")
+    mode_label = "EVAL" if args.eval else "TRAIN"
+    print(f"Mode: {mode_label} | Experiments to run ({len(stems)}):")
     for s in stems:
         print(f"  {s}")
 
     failed = []
     for stem in stems:
-        ok = run_one(stem, dry_run=args.dry_run)
+        ok = run_one(stem, dry_run=args.dry_run, eval_mode=args.eval)
         if not ok:
             failed.append(stem)
 
