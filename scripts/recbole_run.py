@@ -154,7 +154,12 @@ def _parse_test_result(test_result: dict, model_name: str) -> list[dict]:
 # Single experiment
 # ---------------------------------------------------------------------------
 
-def _run_one(dataset: str, model_name: str, overwrite: bool) -> str:
+def _run_one(
+    dataset: str,
+    model_name: str,
+    overwrite: bool,
+    show_progress_bar: bool,
+) -> str:
     out_dir  = _RESULTS_ROOT / dataset / "performance"
     out_file = out_dir / f"{model_name}_recbole.tsv"
 
@@ -181,6 +186,7 @@ def _run_one(dataset: str, model_name: str, overwrite: bool) -> str:
         config_dict={
             "data_path":      data_path,
             "checkpoint_dir": str(checkpoint_dir),
+            "show_progress":  show_progress_bar,
         },
         saved=True,
     )
@@ -232,6 +238,11 @@ def main():
     p.add_argument("--filter",   help="(with --all) only datasets whose name contains this substring")
     p.add_argument("--overwrite", action="store_true",
                    help="Overwrite existing TSV output (checked per dataset×model)")
+    p.add_argument(
+        "--noprogressbar",
+        action="store_true",
+        help="Turn off progress bar"
+    )
     args = p.parse_args()
 
     # Resolve model list — case-insensitive lookup
@@ -267,7 +278,12 @@ def main():
         print(f"dataset={dataset}  model={model_name}")
         print("="*60)
         try:
-            status = _run_one(dataset, model_name, args.overwrite)
+            status = _run_one(
+                dataset,
+                model_name,
+                args.overwrite,
+                show_progress_bar=not args.noprogressbar,
+            )
             if status == "skip":
                 skip += 1
             else:

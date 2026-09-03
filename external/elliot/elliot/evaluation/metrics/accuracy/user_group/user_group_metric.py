@@ -104,6 +104,10 @@ def make_user_group_metric(base_cls, group_name):
 
             super().__init__(filtered, config, params, eval_objects)
 
+        def eval(self):
+            vals = list(self.eval_user_metric().values())
+            return float(np.mean(vals)) if vals else float("nan")
+
         @staticmethod
         def name():
             return f"{base_cls.name()}_{group_name}"
@@ -332,7 +336,7 @@ def make_pop_ndcg_metric(group_name):
                 # IDCG: best case with len(group_gt) items at top positions
                 n_rel = min(len(group_gt), cutoff)
                 idcg = sum(1.0 / np.log2(r + 2) for r in range(n_rel))
-                result[u] = dcg / idcg if idcg > 0 else 0.0
+                result[u] = dcg / idcg if idcg > 0 else float("nan")
             return result
 
     cls_name = f"nDCG_{group_name}"

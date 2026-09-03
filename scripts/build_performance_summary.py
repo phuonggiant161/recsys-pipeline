@@ -166,6 +166,130 @@ def load_metadata(exp_name: str, processed_root: Path) -> dict:
         return {}
 
 
+# ── Group eligibility (NaN vs valid-zero for grouped metrics) ─────────────────
+
+# Predicates mirror those in user_group_metric.py and RecBole metrics.py.
+# Defined locally so this script has no dependency on those modules.
+_LOCAL_USER_BINS: list[tuple] = [
+    ("u1",      lambda c: c == 1),
+    ("u2_5",    lambda c: 2 <= c <= 5),
+    ("u6_10",   lambda c: 6 <= c <= 10),
+    ("u11_20",  lambda c: 11 <= c <= 20),
+    ("u21_40",  lambda c: 21 <= c <= 40),
+    ("u41plus", lambda c: c >= 41),
+]
+_LOCAL_POP_BINS: list[tuple] = [
+    ("pop1",      lambda c: c == 1),
+    ("pop2_5",    lambda c: 2 <= c <= 5),
+    ("pop6_10",   lambda c: 6 <= c <= 10),
+    ("pop11_20",  lambda c: 11 <= c <= 20),
+    ("pop21_40",  lambda c: 21 <= c <= 40),
+    ("pop41plus", lambda c: c >= 41),
+]
+
+# Map canonical metric name → eligibility-cache key used by compute_group_eligibility.
+# User suffixes ("u1", "u2_5", …) → key "user_u1", "user_u2_5", …
+# Pop  suffixes ("pop1", …)       → key "pop_pop1", …
+_METRIC_GROUP_KEY: dict[str, str] = {
+    **{f"Recall_{s}": f"user_{s}" for s in USER_GROUP_SUFFIXES},
+    **{f"nDCG_{s}":   f"user_{s}" for s in USER_GROUP_SUFFIXES},
+    **{f"Recall_{s}": f"pop_{s}"  for s in POP_GROUP_SUFFIXES},
+    **{f"nDCG_{s}":   f"pop_{s}"  for s in POP_GROUP_SUFFIXES},
+}
+
+_GROUP_ELIGIBILITY_CACHE: dict[tuple, dict[str, int]] = {}
+
+
+def compute_group_eligibility(exp_name: str, processed_root: Path) -> dict[str, int]:
+    """Return per-group eligible-evaluation user counts from train/test TSV files.
+
+    Keys:  "user_u1", "user_u2_5", …, "pop_pop1", "pop_pop2_5", …
+    Value: number of users who have ≥1 test GT entry in that group (0 → not evaluable).
+
+    For user groups  : users whose train-interaction count falls in the bin AND
+                       who appear in test.tsv (have at least one GT item).
+    For pop groups   : users who have ≥1 test GT item whose train-interaction count
+                       falls in the bin.
+
+    Returns an empty dict when train.tsv / test.tsv are not found; callers treat
+    this as "unknown" and leave metric values unchanged.
+    Results are cached keyed by (exp_name, str(processed_root)).
+    """
+    cache_key = (exp_name, str(processed_root))
+    if cache_key in _GROUP_ELIGIBILITY_CACHE:
+        return _GROUP_ELIGIBILITY_CACHE[cache_key]
+
+    train_path = processed_root / exp_name / "train.tsv"
+    test_path  = processed_root / exp_name / "test.tsv"
+    result: dict[str, int] = {}
+
+    if not train_path.exists() or not test_path.exists():
+        _GROUP_ELIGIBILITY_CACHE[cache_key] = result
+        return result
+
+    try:
+        # col 0 = user, col 1 = item; works for 2- or 3-column files (no header)
+        train_df = pd.read_csv(train_path, sep="\t", header=None, usecols=[0, 1])
+        test_df  = pd.read_csv(test_path,  sep="\t", header=None, usecols=[0, 1])
+    except Exception as e:
+        print(f"[WARN] compute_group_eligibility({exp_name}): read error — {e}")
+        _GROUP_ELIGIBILITY_CACHE[cache_key] = result
+        return result
+
+    u_col, i_col = train_df.columns[0], train_df.columns[1]
+    tu_col, ti_col = test_df.columns[0], test_df.columns[1]
+
+    user_train_counts = train_df.groupby(u_col).size()
+    item_train_counts = train_df.groupby(i_col).size()
+
+    test_users_set = set(test_df[tu_col].unique())
+    # {user: set(test items)} — used for pop-group eligibility check
+    test_items_by_user: dict = test_df.groupby(tu_col)[ti_col].agg(set).to_dict()
+
+    # User activity groups: eligible = group members ∩ users with any test GT
+    for group_name, pred in _LOCAL_USER_BINS:
+        group_users = frozenset(u for u, c in user_train_counts.items() if pred(c))
+        result[f"user_{group_name}"] = len(group_users & test_users_set)
+
+    # Item popularity groups: eligible = users with ≥1 test GT item in the group
+    for group_name, pred in _LOCAL_POP_BINS:
+        group_items = frozenset(i for i, c in item_train_counts.items() if pred(c))
+        result[f"pop_{group_name}"] = sum(
+            1 for items in test_items_by_user.values()
+            if not group_items.isdisjoint(items)
+        )
+
+    _GROUP_ELIGIBILITY_CACHE[cache_key] = result
+    return result
+
+
+def apply_group_eligibility(
+    record: dict, exp_name: str, processed_root: Path
+) -> dict:
+    """Replace grouped-metric values with NaN when the group has no eligible cases.
+
+    Semantics:
+      eligible_count > 0, raw = 0.0  → keep 0.0   (true zero: group exists, 0 hits)
+      eligible_count = 0, raw = any  → NaN         (group not evaluable)
+      raw = NaN                       → unchanged   (already absent)
+      processed data unavailable      → unchanged   (conservative)
+
+    Modifies *record* in place and returns it.
+    """
+    eligibility = compute_group_eligibility(exp_name, processed_root)
+    if not eligibility:
+        return record  # processed data unavailable — leave as-is
+
+    for metric, group_key in _METRIC_GROUP_KEY.items():
+        raw = record.get(metric)
+        if raw is None or (isinstance(raw, float) and np.isnan(raw)):
+            continue  # absent or already NaN — no action needed
+        if eligibility.get(group_key, -1) == 0:
+            record[metric] = float("nan")
+
+    return record
+
+
 # ── Collectors ────────────────────────────────────────────────────────────────
 
 def collect_elliot(elliot_root: Path, processed_root: Path, audit: list) -> list[dict]:
@@ -251,6 +375,7 @@ def collect_elliot(elliot_root: Path, processed_root: Path, audit: list) -> list
                 for canonical, elliot_col in _ELLIOT_BEYOND_COL.items():
                     v = row.get(elliot_col, float("nan"))
                     record[canonical] = float(v) if pd.notna(v) else float("nan")
+                apply_group_eligibility(record, exp_dir.name, processed_root)
                 rows.append(record)
 
     return rows
@@ -300,7 +425,8 @@ def _load_beyond_index(perf_dir: Path) -> dict[tuple, dict]:
 
 
 def _collect_recbole_from_evaluation(
-    tsv: Path, exp_dir_name: str, exp_meta: dict, metadata: dict, audit: list
+    tsv: Path, exp_dir_name: str, exp_meta: dict, metadata: dict, audit: list,
+    processed_root: Path = DEFAULT_PROCESSED,
 ) -> list[dict]:
     """Parse *_evaluation.tsv (wide format, one row per model, cols like recall@20).
     Returns one record per (model, cutoff) with all canonical metrics."""
@@ -344,6 +470,7 @@ def _collect_recbole_from_evaluation(
             for canonical, raw_col in metric_col_map.items():
                 v = row.get(raw_col, float("nan"))
                 record[canonical] = float(v) if pd.notna(v) else float("nan")
+            apply_group_eligibility(record, exp_dir_name, processed_root)
             rows.append(record)
     return rows
 
@@ -387,7 +514,7 @@ def collect_recbole(recbole_root: Path, processed_root: Path, audit: list) -> li
         # Priority: use *_evaluation.tsv when available
         for fname_model, tsv in eval_files.items():
             rows.extend(_collect_recbole_from_evaluation(
-                tsv, exp_dir.name, exp_meta, metadata, audit))
+                tsv, exp_dir.name, exp_meta, metadata, audit, processed_root))
             if fname_model in recbole_files:
                 audit.append({
                     "level": "WARN", "source": str(tsv),
@@ -439,6 +566,7 @@ def collect_recbole(recbole_root: Path, processed_root: Path, audit: list) -> li
                 bdata = beyond_idx.get((content_norm, cutoff), {})
                 for metric in BEYOND_ACCURACY_METRICS:
                     record[metric] = bdata.get(metric, float("nan"))
+                apply_group_eligibility(record, exp_dir.name, processed_root)
                 rows.append(record)
 
     return rows
