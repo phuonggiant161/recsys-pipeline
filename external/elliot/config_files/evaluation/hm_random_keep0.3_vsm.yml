@@ -17,8 +17,11 @@ experiment:
     - ItemCoverage
     - ARP
     - APLT
+    - Precision
     - Recall
     - nDCG
+    - MAP
+    - MRR
     - Recall_pop1
     - Recall_pop2_5
     - Recall_pop6_10
