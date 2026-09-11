@@ -37,7 +37,7 @@ train_batch_size: 2048
 learning_rate: 0.001
 
 # evaluation
-metrics: [Recall, NDCG, Hit, Precision]
+metrics: [Precision, Recall, NDCG, MAP, MRR, Hit]
 topk: [10,20,50]
 valid_metric: NDCG@10
 

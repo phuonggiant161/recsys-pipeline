@@ -18,6 +18,9 @@ from src.dataset_folder import (
     save_dataset_folder,
     save_train_valid_test_folder,
 )
+from src.sasrec_history import build_sasrec_histories, ROW_SEQ_COL
+
+MAX_ITEM_LIST_LENGTH = 50
 
 # ── Default constants (edit here, or override via CLI args) ──────────────────
 # DATASET_NAME   = "amazon"   # "hm"
@@ -66,50 +69,6 @@ def parse_args():
                    help=f"Min interactions per item for k-core (default: {K_ITEM})")
     return p.parse_args()
 
-# add history of items for each user to the dataset
-    dense_df = add_user_item_history(dense_df, user_col, item_col, timestamp_col)
- 
-def add_user_item_history(
-    df: pd.DataFrame,
-    user_col: str,
-    item_col: str,
-    timestamp_col: str,
-    max_item_list_length: int = 50,
-) -> pd.DataFrame:
-    """Add each interaction's previous item history in chronological order."""
-    if max_item_list_length < 1:
-        raise ValueError("max_item_list_length must be at least 1")
- 
-    required_columns = {user_col, item_col, timestamp_col}
-    missing_columns = required_columns - set(df.columns)
-    if missing_columns:
-        raise KeyError(f"Missing required columns: {sorted(missing_columns)}")
- 
-    result = df.copy()
-    result["item_id_list"] = ""
- 
-    work = result.reset_index(drop=False).rename(columns={"index": "__row_order"})
-    work = work.sort_values(
-        [user_col, timestamp_col, "__row_order"],
-        kind="stable",
-    )
- 
-    # Build item history for each user in chronological order, limited to max_item_list_length
-    fakeitem = "__FAKE_ITEM__"      # fake item to use for first interaction (no history)
-    histories: dict[int, str] = {}
-    for _, user_rows in work.groupby(user_col, sort=False):
-        item_history: list[str] = []
-        for row_index, item_id in zip(user_rows["__row_order"], user_rows[item_col]):
-            if len(item_history) == 0:
-                histories[row_index] = fakeitem
-            else:
-                histories[row_index] = " ".join(item_history[-max_item_list_length:])
-            item_history.append(str(item_id))
- 
-    result["item_id_list"] = pd.Series(histories).reindex(result.index, fill_value="")
-    return result
- 
-
 
 def _format_sig_pct(x, sig=2):
     """Format a fraction (0–1) as a percentage string with `sig` significant figures.
@@ -146,6 +105,68 @@ def _dataframe_hash(df: pd.DataFrame, key_cols: list[str]) -> int:
         .reset_index(drop=True)
     )
     return int(pd.util.hash_pandas_object(normalized, index=False).sum())
+
+
+def _verify_membership_unchanged(
+    label: str,
+    output_dir: Path,
+    new_train: pd.DataFrame,
+    new_valid: pd.DataFrame,
+    new_test: pd.DataFrame,
+    user_col: str,
+    item_col: str,
+    timestamp_col: str,
+) -> None:
+    """
+    Guard against accidental split changes when regenerating an existing
+    dataset variant (e.g. after refactoring SASRec history construction).
+
+    Compares (user, item, timestamp) row membership of the about-to-be-saved
+    train/valid/test against whatever is already on disk at output_dir, using
+    the same sort-stable hash as the rest of the pipeline. `item_id_list` is
+    intentionally excluded from the comparison -- only split membership must
+    stay fixed.
+
+    If output_dir has no prior train.csv/valid.csv/test.csv (first-ever run
+    for this variant), the check is skipped. If a hash mismatch is found,
+    raises RuntimeError and does NOT save -- the caller must not overwrite
+    existing data with a changed split.
+    """
+    key_cols = [user_col, item_col, timestamp_col]
+    old_paths = {
+        "train": Path(output_dir) / "train.csv",
+        "valid": Path(output_dir) / "valid.csv",
+        "test":  Path(output_dir) / "test.csv",
+    }
+    if not all(p.exists() for p in old_paths.values()):
+        print(f"  [verify][{label}] no prior output at {output_dir} -- skipping membership check (first run)")
+        return
+
+    new_frames = {"train": new_train, "valid": new_valid, "test": new_test}
+    mismatches = []
+    for split_name, path in old_paths.items():
+        old_df = pd.read_csv(path, dtype=str, usecols=lambda c: c in set(key_cols))
+        missing = set(key_cols) - set(old_df.columns)
+        if missing:
+            raise RuntimeError(
+                f"[verify][{label}] existing {path} is missing columns {sorted(missing)} "
+                "-- cannot verify membership; refusing to overwrite."
+            )
+        old_hash = _dataframe_hash(old_df, key_cols)
+        new_hash = _dataframe_hash(new_frames[split_name][key_cols].astype(str), key_cols)
+        if old_hash != new_hash:
+            mismatches.append(split_name)
+
+    if mismatches:
+        raise RuntimeError(
+            f"[verify][{label}] STOP: {', '.join(mismatches)} row membership "
+            f"(user,item,timestamp) differs from the existing data at {output_dir}. "
+            "This refactor must not change split membership -- refusing to overwrite. "
+            "Investigate before proceeding (do not re-run with different code paths "
+            "that could silently mask this)."
+        )
+
+    print(f"  [verify][{label}] train/valid/test membership unchanged vs {output_dir}")
 
 
 def _verify_split(
@@ -433,9 +454,6 @@ def main():
         "metrics": dense_metrics,
     }
 
-    # add history of items for each user to the dataset
-    dense_df = add_user_item_history(dense_df, user_col, item_col, timestamp_col)
-
     save_dataset_folder(
         df=dense_df,
         output_dir=dense_output,
@@ -443,6 +461,14 @@ def main():
         item_col=item_col,
         metadata=dense_metadata,
     )
+
+    # Stable row identifier assigned once, before any split/thinning. Carried
+    # through every downstream train/valid/test/thinned frame (all split and
+    # thinning helpers preserve extra columns) and used only as a deterministic
+    # tie-break when building SASRec histories (see src/sasrec_history.py) --
+    # never used for split/thinning decisions themselves.
+    dense_df = dense_df.reset_index(drop=True)
+    dense_df[ROW_SEQ_COL] = np.arange(len(dense_df), dtype=np.int64)
 
     # ── Step 4: dense_df → train_pool_base / test_base ──────────────────────
     desired_test_rows_sum = _desired_holdout_sum(dense_df, user_col, TEST_SIZE)
@@ -561,10 +587,20 @@ def main():
         "test_rows":   int(len(test_base)),
     }
 
+    train_base_hist, valid_base_hist, test_base_hist = build_sasrec_histories(
+        train_df=train_base, valid_df=valid_base, test_df=test_base,
+        user_col=user_col, item_col=item_col, timestamp_col=timestamp_col,
+        row_seq_col=ROW_SEQ_COL, max_item_list_length=MAX_ITEM_LIST_LENGTH,
+    )
+    _verify_membership_unchanged(
+        base_output.name, base_output,
+        train_base_hist, valid_base_hist, test_base_hist,
+        user_col, item_col, timestamp_col,
+    )
     save_train_valid_test_folder(
-        train_df=train_base,
-        valid_df=valid_base,
-        test_df=test_base,
+        train_df=train_base_hist,
+        valid_df=valid_base_hist,
+        test_df=test_base_hist,
         output_dir=base_output,
         user_col=user_col,
         item_col=item_col,
@@ -618,8 +654,18 @@ def main():
             desired_valid_rows_sum=desired_valid_rows_sum,
             thin_train=thin_train, thin_valid=thin_valid,
         )
-        save_train_valid_test_folder(
+        thin_train_hist, thin_valid_hist, test_hist = build_sasrec_histories(
             train_df=thin_train, valid_df=thin_valid, test_df=test_base,
+            user_col=user_col, item_col=item_col, timestamp_col=timestamp_col,
+            row_seq_col=ROW_SEQ_COL, max_item_list_length=MAX_ITEM_LIST_LENGTH,
+        )
+        _verify_membership_unchanged(
+            thin_output.name, thin_output,
+            thin_train_hist, thin_valid_hist, test_hist,
+            user_col, item_col, timestamp_col,
+        )
+        save_train_valid_test_folder(
+            train_df=thin_train_hist, valid_df=thin_valid_hist, test_df=test_hist,
             output_dir=thin_output, user_col=user_col, item_col=item_col,
             metadata=thin_metadata,
         )
@@ -672,8 +718,18 @@ def main():
             desired_valid_rows_sum=desired_valid_rows_sum,
             thin_train=thin_train, thin_valid=thin_valid,
         )
-        save_train_valid_test_folder(
+        thin_train_hist, thin_valid_hist, test_hist = build_sasrec_histories(
             train_df=thin_train, valid_df=thin_valid, test_df=test_base,
+            user_col=user_col, item_col=item_col, timestamp_col=timestamp_col,
+            row_seq_col=ROW_SEQ_COL, max_item_list_length=MAX_ITEM_LIST_LENGTH,
+        )
+        _verify_membership_unchanged(
+            thin_output.name, thin_output,
+            thin_train_hist, thin_valid_hist, test_hist,
+            user_col, item_col, timestamp_col,
+        )
+        save_train_valid_test_folder(
+            train_df=thin_train_hist, valid_df=thin_valid_hist, test_df=test_hist,
             output_dir=thin_output, user_col=user_col, item_col=item_col,
             metadata=thin_metadata,
         )
@@ -726,8 +782,18 @@ def main():
             desired_valid_rows_sum=desired_valid_rows_sum,
             thin_train=thin_train, thin_valid=thin_valid,
         )
-        save_train_valid_test_folder(
+        thin_train_hist, thin_valid_hist, test_hist = build_sasrec_histories(
             train_df=thin_train, valid_df=thin_valid, test_df=test_base,
+            user_col=user_col, item_col=item_col, timestamp_col=timestamp_col,
+            row_seq_col=ROW_SEQ_COL, max_item_list_length=MAX_ITEM_LIST_LENGTH,
+        )
+        _verify_membership_unchanged(
+            thin_output.name, thin_output,
+            thin_train_hist, thin_valid_hist, test_hist,
+            user_col, item_col, timestamp_col,
+        )
+        save_train_valid_test_folder(
+            train_df=thin_train_hist, valid_df=thin_valid_hist, test_df=test_hist,
             output_dir=thin_output, user_col=user_col, item_col=item_col,
             metadata=thin_metadata,
         )
