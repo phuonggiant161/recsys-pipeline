@@ -8,7 +8,9 @@ Chart groups:
   gini                 — main metrics vs item/user Gini
   beyond_accuracy      — coverage/popularity/diversity metrics
   coldstart_groups     — per-experiment categorical group charts +
-                         popularity/user cross-variant charts (USS, ItemGini)
+                         popularity/user cross-variant charts (USS, ItemGini);
+                         cross-variant charts use head/random/tail @ gini_keep_frac
+                         (same experiment selection as the gini group)
   group_distribution   — 100%-stacked item-popularity and user-activity bars
 
 Usage:
@@ -793,24 +795,66 @@ def _generate_cross_variant_charts(
     x_label: str,
     parent_folder: str,
     chart_group: str,
+    gini_keep_frac: float,
 ) -> list:
-    """Cross-variant scatter/line charts: strategy=random, x=x_col, y=y_metric.
+    """Cross-variant scatter/line charts: strategy in [head, random, tail] at a
+    single keep_frac (same experiment-selection logic as generate_gini_charts),
+    x=x_col, y=y_metric.
 
     Output: {ds}/coldstart_groups/{parent_folder}/cutoff_{cutoff}/{x_col}/{y_metric_lower}_vs_{x_col}.png
     """
+    CROSS_STRATEGIES = ["head", "random", "tail"]
     index = []
     for ds in sorted(df["dataset"].unique()):
-        sub = df[
+        ds_sub = df[
             df["dataset"].eq(ds)
-            & df["strategy"].eq("random")
+            & df["strategy"].isin(CROSS_STRATEGIES)
+            & _keep_frac_mask(df, gini_keep_frac)
             & df["cutoff"].eq(cutoff)
         ].copy()
-        if sub.empty:
+
+        if ds_sub.empty:
+            for y_metric in y_metrics:
+                index.append({
+                    "dataset":     ds,
+                    "chart_group": chart_group,
+                    "strategy":    "head/random/tail",
+                    "cutoff":      cutoff,
+                    "x_metric":    x_col,
+                    "y_metric":    y_metric,
+                    "gini_type":   "",
+                    "output_path": "",
+                    "status":      "skip",
+                    "reason":      f"no data for keep_frac={gini_keep_frac}",
+                    "warning":     "",
+                })
             continue
+
+        present_strategies = set(ds_sub["strategy"].unique())
+        missing_strategies = set(CROSS_STRATEGIES) - present_strategies
+        if missing_strategies:
+            reason = f"Missing strategies: {sorted(missing_strategies)}"
+            warnings.warn(f"[{chart_group}/{ds}] {reason}", stacklevel=2)
+            for y_metric in y_metrics:
+                index.append({
+                    "dataset":     ds,
+                    "chart_group": chart_group,
+                    "strategy":    "head/random/tail",
+                    "cutoff":      cutoff,
+                    "x_metric":    x_col,
+                    "y_metric":    y_metric,
+                    "gini_type":   "",
+                    "output_path": "",
+                    "status":      "skip",
+                    "reason":      reason,
+                    "warning":     "",
+                })
+            continue
+
         ds_label = _fmt_dataset(ds)
-        assert_no_duplicates(sub, ["experiment", "series_label", "cutoff"])
-        labels = sorted_series_labels(sub["series_label"].unique().tolist())
-        mixed  = check_mixed_frameworks(sub, f"coldstart_groups/{ds}/{parent_folder}/{x_col}")
+        assert_no_duplicates(ds_sub, ["experiment", "series_label", "cutoff"])
+        labels = sorted_series_labels(ds_sub["series_label"].unique().tolist())
+        mixed  = check_mixed_frameworks(ds_sub, f"coldstart_groups/{ds}/{parent_folder}/{x_col}")
 
         for y_metric in y_metrics:
             out_path = (
@@ -818,17 +862,21 @@ def _generate_cross_variant_charts(
                 / f"cutoff_{cutoff}" / x_col
                 / f"{_metric_filename(y_metric)}_vs_{x_col}.png"
             )
-            title  = f"{ds_label}: {y_metric}@{cutoff} vs {x_label}"
+            title = (
+                f"{ds_label} keep_frac={gini_keep_frac}: "
+                f"{y_metric}@{cutoff} vs {x_label}"
+            )
             result = plot_single_metric_chart(
-                sub=sub, x_col=x_col, y_col=y_metric,
+                sub=ds_sub, x_col=x_col, y_col=y_metric,
                 title=title, x_label=x_label, y_label=y_metric,
                 palette=palette, out_path=out_path, labels=labels,
+                annotate_strategy=True,
             )
             w = MIXED_FW_NOTE if mixed and result.get("status") == "ok" else ""
             index.append({
                 "dataset":     ds,
                 "chart_group": chart_group,
-                "strategy":    "random",
+                "strategy":    "head/random/tail",
                 "cutoff":      cutoff,
                 "x_metric":    x_col,
                 "y_metric":    y_metric,
@@ -909,12 +957,18 @@ def plot_group_chart(
     return {"status": "ok", "output_path": display_path(out_path)}
 
 
-def generate_coldstart_groups_charts(df: pd.DataFrame, out_base: Path, palette: dict) -> list[dict]:
+def generate_coldstart_groups_charts(
+    df: pd.DataFrame, out_base: Path, palette: dict, gini_keep_frac: float
+) -> list[dict]:
     """
     Per-experiment charts showing model performance across popularity/user groups.
     X-axis: categorical groups; lines: models; cutoff=20 only.
     Output: {ds}/coldstart_groups/popularity/{experiment}/recall.png  (and ndcg.png)
             {ds}/coldstart_groups/user/{experiment}/recall.png        (and ndcg.png)
+
+    The cross-variant charts appended below (steps 3-5) use the same
+    strategy in [head, random, tail] @ gini_keep_frac experiment selection as
+    generate_gini_charts(), so they stay in sync with the gini charts.
     """
     CUTOFF = GROUP_CUTOFF
     index  = []
@@ -969,6 +1023,7 @@ def generate_coldstart_groups_charts(df: pd.DataFrame, out_base: Path, palette: 
         x_col="uss", x_label="AIU (USS)",
         parent_folder="popularity",
         chart_group="coldstart_popularity_uss",
+        gini_keep_frac=gini_keep_frac,
     ))
 
     index.extend(_generate_cross_variant_charts(
@@ -977,6 +1032,7 @@ def generate_coldstart_groups_charts(df: pd.DataFrame, out_base: Path, palette: 
         x_col="item_gini", x_label="Item Gini",
         parent_folder="popularity",
         chart_group="coldstart_popularity_item_gini",
+        gini_keep_frac=gini_keep_frac,
     ))
 
     index.extend(_generate_cross_variant_charts(
@@ -985,6 +1041,7 @@ def generate_coldstart_groups_charts(df: pd.DataFrame, out_base: Path, palette: 
         x_col="uss", x_label="AIU (USS)",
         parent_folder="user",
         chart_group="coldstart_user_uss",
+        gini_keep_frac=gini_keep_frac,
     ))
 
     return index
@@ -1304,7 +1361,9 @@ def main():
     index_beyond = generate_beyond_accuracy_charts(df, out_base, palette)
 
     print("Generating coldstart group charts (per-experiment + cross-variant) ...")
-    index_groups = generate_coldstart_groups_charts(df, out_base, palette)
+    index_groups = generate_coldstart_groups_charts(
+        df, out_base, palette, gini_keep_frac=args.gini_keep_frac
+    )
 
     print("Generating group distribution charts ...")
     index_dist = generate_group_distribution_charts(out_base, Path(args.processed_dir))
