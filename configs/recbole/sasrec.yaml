@@ -33,7 +33,7 @@ train_neg_sample_args: ~
 
 # training
 epochs: 100
-train_batch_size: 2048
+train_batch_size: 4096
 learning_rate: 0.001
 
 # evaluation

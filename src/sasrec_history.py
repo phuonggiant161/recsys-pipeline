@@ -15,15 +15,22 @@ build_sasrec_histories(train_df, valid_df, test_df, user_col, item_col,
     Returns (train_out, valid_out, test_out) -- copies of the inputs with
     `item_id_list` added/replaced and `row_seq_col` dropped.
 
-History rules (no leakage across splits)
------------------------------------------
+History rules (advisor-confirmed evaluation protocol)
+------------------------------------------------------
   TRAIN target : history = that user's earlier TRAIN interactions only.
   VALID target : history = that user's earlier TRAIN interactions only
                  (frozen from train -- earlier VALID targets are never
                  included, so validation targets never see each other).
-  TEST target   : history = that user's earlier TRAIN + VALID interactions
-                 (earlier TEST targets are never included, so test targets
-                 never see each other's ground truth).
+  TEST target   : history = that user's earlier TRAIN + VALID + TEST
+                 interactions, in chronological order (rolling history).
+                 A TEST target is never included in its OWN history, but
+                 once its history has been recorded it is appended to the
+                 pool so a *later* TEST target from the same user can see
+                 it. This is intentional, not leakage: at evaluation time
+                 RecBole only ever receives one row's own `item_id_list`
+                 (the earlier interactions), never the row's own target
+                 item, and a given target's history is fixed before the
+                 model ever sees it.
 
 Ordering is by timestamp per user; exact timestamp ties are broken by
 `row_seq_col`, a stable identifier assigned once (before any split or
@@ -122,18 +129,21 @@ def build_sasrec_histories(
             item_str = str(item_id)
             source = train_pool if split in ("train", "valid") else combined_pool
 
+            # 1. Build this row's history from *previously seen* interactions
+            #    only, then 2. save it -- before touching either pool below.
             if source:
                 histories[(split, orig_idx)] = " ".join(source[-max_item_list_length:])
             else:
                 histories[(split, orig_idx)] = fake_item_token
 
+            # 3. Only now append the current target so it can appear in a
+            #    later row's history (rolling), never its own.
             if split == "train":
                 train_pool.append(item_str)
-                combined_pool.append(item_str)
-            elif split == "valid":
-                combined_pool.append(item_str)
-            # test items are never appended to any pool -- they must never
-            # appear in another row's history.
+            combined_pool.append(item_str)
+            # combined_pool accumulates TRAIN, then VALID, then TEST items in
+            # chronological order -- TEST targets roll forward into later TEST
+            # targets' history, matching the advisor-confirmed protocol.
 
     def _assign(df: pd.DataFrame, split_name: str) -> pd.DataFrame:
         out = df.drop(columns=[row_seq_col]).copy()
