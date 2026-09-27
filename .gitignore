@@ -40,3 +40,7 @@ results/elliot/*/logs/
 !data/reports/.gitkeep
 !data/reports/*.csv
 !results/elliot/*/performance/*.tsv
+
+
+# Third-party LibRecommender source — installed separately
+external/librecommender/
