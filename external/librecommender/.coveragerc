@@ -1,0 +1,43 @@
+[run]
+parallel = True
+
+concurrency = multiprocessing
+
+source =
+    libreco/
+    libserving/serialization/
+    libserving/sanic_serving/
+
+omit =
+    libreco/utils/exception.py
+    libreco/utils/sampling.py
+    libserving/sanic_serving/benchmark.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    raise AssertionError
+    raise NameError
+    raise NotImplementedError
+    raise OSError.*
+    raise ValueError
+    raise SanicException.*
+    except .*redis.*
+    except \(ImportError, ModuleNotFoundError\):
+    except ValidationError.
+    if __name__ == .__main__.:
+    @(abc\.)?abstractmethod
+
+precision = 2
+
+show_missing = True
+
+skip_empty = True
+
+[html]
+directory = html-coverage-report
+
+title = LibRecommender Coverage Report
+
+[xml]
+output = coverage.xml

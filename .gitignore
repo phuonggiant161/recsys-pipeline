@@ -1,4 +1,5 @@
 venv/
+.venv-twotower/
 __pycache__/
 *.py[cod]
 dev/
@@ -18,6 +19,9 @@ log_tensorboard/
 
 # RecBole outputs
 results/recbole/
+
+# LibRecommender outputs (TwoTower checkpoints/npz can be tens/hundreds of MB each)
+results/librecommender/
 
 # Elliot outputs written to external/results/ (generated, not source)
 external/results/

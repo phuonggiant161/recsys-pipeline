@@ -1,0 +1,113 @@
+[build-system]
+requires = [
+    "setuptools>=54.0.0",
+    "wheel",
+    "Cython>=0.29.0,<3",
+    "numpy>=1.19.5",
+    "scipy>=1.2.1",
+    "tomli",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "LibRecommender"
+version = "1.5.2"
+description = "Versatile end-to-end recommender system."
+authors = [
+    { name = "massquantity", email = "jinxin_madie@163.com" },
+]
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.6"
+keywords = ["Collaborative Filtering", "Recommender System"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Cython",
+    "Programming Language :: Rust",
+]
+dependencies = [
+    "gensim >= 4.0.0",
+    "tqdm",
+]
+
+[project.urls]
+documentation = "https://librecommender.readthedocs.io/en/latest/"
+repository = "https://github.com/massquantity/LibRecommender"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["libreco*", "libserving*"]
+namespaces = false
+
+[tool.black]
+line-length = 88
+target-version = ["py36", "py38", "py310"]
+
+[tool.isort]
+atomic = true
+default_section = "THIRDPARTY"
+extend_skip_glob = ["*.pyx"]
+force_grid_wrap = 0
+include_trailing_comma = true
+known_first_party = ["libreco", "libserving"]
+known_third_party = "pytest"
+line_length = 88
+multi_line_output = 3
+profile = "black"
+reverse_relative = true
+
+[tool.pydocstyle]
+add-ignore = ["D102"]
+add-select = ["D212", "D402", "D415", "D416", "D417"]
+convention = "numpy"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-v --durations=20 --color=yes"
+filterwarnings = [
+    "ignore:the imp module is deprecated in favour of importlib:DeprecationWarning",
+    "ignore:distutils Version classes are deprecated. Use packaging.version instead:DeprecationWarning",
+    "ignore:The gensim.similarities.levenshtein submodule is disabled, because the optional Levenshtein package:UserWarning",
+    "ignore:.(tf.layers|layer|tf.nn).* is deprecated:UserWarning",
+    "ignore:User provided device_type of 'cuda', but CUDA is not available:UserWarning",
+    "ignore:`build_negative_samples` is deprecated",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py38"
+output-format  = "full"
+lint.ignore = ["E501", "RUF022", "RUF023", "RUF028"]
+lint.select = [
+    # flake8-async
+    "ASYNC",
+    # pyflakes
+    "F",
+    # pycodestyle(Error, Warning)
+    "E",
+    "W",
+    # flake8-2020
+    "YTT",
+    # flake8-bugbear
+    "B",
+    # pandas-vet
+    "PD",
+    # NumPy-specific rules
+    "NPY",
+    # Ruff-specific rules
+    "RUF",
+]
+exclude = ["sampling.py"]  # deprecated module

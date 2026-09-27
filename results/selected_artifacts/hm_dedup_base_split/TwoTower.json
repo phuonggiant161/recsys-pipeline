@@ -1,0 +1,9 @@
+{
+  "framework": "librecommender",
+  "dataset": "hm_dedup_base_split",
+  "model": "TwoTower",
+  "selected_artifact": "D:\\recsys-pipeline\\results\\librecommender\\hm_dedup_base_split\\recs\\TwoTower.tsv",
+  "artifact_type": "recommendations",
+  "selected_iteration": 51,
+  "best_valid_ndcg10": 0.039459
+}

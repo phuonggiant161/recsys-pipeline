@@ -1,0 +1,18 @@
+codecov:
+  notify:
+    after_n_builds: 1
+
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        target: '50'
+        informational: true
+
+ignore:
+  - "docs/*"
+  - "docker/*"

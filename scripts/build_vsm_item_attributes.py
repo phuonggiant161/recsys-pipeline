@@ -35,68 +35,19 @@ from pathlib import Path
 import pandas as pd
 from sklearn.feature_extraction.text import CountVectorizer
 
+from content_utils import (
+    DATASET_PROFILES,
+    MAX_FEATURES,
+    MIN_DF,
+    TOKEN_PATTERN,
+    build_doc_column,
+    dedup_by_item_key,
+    load_item_documents,
+    load_metadata,
+)
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
-
-# ── Vectorizer defaults ──────────────────────────────────────────────────────
-MIN_DF = 2
-MAX_FEATURES = 50_000
-TOKEN_PATTERN = r"(?u)[a-zA-Z0-9]+"
-
-# ── Dataset profiles ─────────────────────────────────────────────────────────
-# item_key   : column name for item identifier in metadata CSV
-# item_dtype : Python type for item IDs (int for H&M, str for Amazon)
-# text_cols  : columns to concatenate into VSM document
-# meta_dtype : dtype hints for pd.read_csv on metadata file
-
-_DATASET_PROFILES: dict[str, dict] = {
-    "hm": {
-        "item_key": "article_id",
-        "item_dtype": int,
-        "text_cols": ["prod_name", "detail_desc"],
-        "meta_dtype": {"article_id": int},
-    },
-    "amazon": {
-        "item_key": "parent_asin",
-        "item_dtype": str,
-        "text_cols": ["title", "description"],
-        "meta_dtype": {},
-    },
-}
-
-
-# ── Shared helpers ────────────────────────────────────────────────────────────
-
-def _load_meta(metadata_path: Path, meta_dtype: dict) -> pd.DataFrame:
-    kw = {"dtype": meta_dtype} if meta_dtype else {}
-    meta = pd.read_csv(metadata_path, **kw)
-    meta.columns = [c.lstrip("﻿") for c in meta.columns]  # strip UTF-8 BOM
-    return meta
-
-
-def _safe_str(val) -> str:
-    """Convert a value to string — handles NaN, list, dict safely."""
-    if isinstance(val, (list,)):
-        return " ".join(str(v) for v in val)
-    if isinstance(val, dict):
-        return " ".join(str(v) for v in val.values())
-    try:
-        if pd.isna(val):
-            return ""
-    except (TypeError, ValueError):
-        pass
-    return str(val)
-
-
-def _build_doc_column(df: pd.DataFrame, text_cols: list[str]) -> pd.DataFrame:
-    df = df.copy()
-    for col in text_cols:
-        if col in df.columns:
-            df[col] = df[col].apply(_safe_str)
-        else:
-            df[col] = ""
-    df["doc"] = df[text_cols].agg(" ".join, axis=1).str.strip()
-    return df
 
 
 def _vectorize(docs: pd.Series, min_df: int, max_features: int) -> tuple:
@@ -167,8 +118,7 @@ def build_global_item_attributes(
     """Build item_attributes.tsv from ALL items in metadata (no per-experiment filtering)."""
     output_path = Path(output_path)
 
-    meta = _load_meta(metadata_path, meta_dtype)
-    meta = _build_doc_column(meta, text_cols)
+    meta = load_item_documents(metadata_path, item_key, text_cols, meta_dtype)
 
     if meta.empty:
         raise ValueError(f"No items found in {metadata_path}")
@@ -253,7 +203,7 @@ def build_item_attributes(
             print(f"  [INFO] items.csv has {len(valid_only)} valid-only items "
                   f"not in train/test — excluded (correct)")
 
-    meta = _load_meta(metadata_path, meta_dtype)
+    meta = load_metadata(metadata_path, meta_dtype)
     meta_filtered = meta[meta[item_key].apply(item_dtype).isin(tsv_ids)].copy().reset_index(drop=True)
 
     feature_map: dict = {}
@@ -262,7 +212,8 @@ def build_item_attributes(
     if meta_filtered.empty:
         print("  [WARN] No metadata found for any item; all items will have empty feature lists")
     else:
-        meta_filtered = _build_doc_column(meta_filtered, text_cols)
+        meta_filtered = dedup_by_item_key(meta_filtered, item_key)
+        meta_filtered = build_doc_column(meta_filtered, text_cols)
         X, vocab = _vectorize(meta_filtered["doc"], min_df=min_df, max_features=max_features)
         feature_map = _build_feature_map(X, meta_filtered, item_key, item_dtype)
 
@@ -307,13 +258,13 @@ def build_item_attributes(
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def parse_args() -> argparse.Namespace:
-    valid_datasets = ", ".join(_DATASET_PROFILES)
+    valid_datasets = ", ".join(DATASET_PROFILES)
     p = argparse.ArgumentParser(
         description="Build Elliot VSM ItemAttributes file from item metadata.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument(
-        "--dataset", default="hm", choices=list(_DATASET_PROFILES),
+        "--dataset", default="hm", choices=list(DATASET_PROFILES),
         help=f"Dataset profile: {valid_datasets} (default: hm)",
     )
     p.add_argument(
@@ -369,7 +320,7 @@ def main() -> None:
         print(f"[ERROR] Metadata file not found: {metadata_path}")
         return
 
-    profile = _DATASET_PROFILES[args.dataset]
+    profile = DATASET_PROFILES[args.dataset]
     item_key = profile["item_key"]
     item_dtype = profile["item_dtype"]
     text_cols = profile["text_cols"]
