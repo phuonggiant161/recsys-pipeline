@@ -44,3 +44,9 @@ results/elliot/*/logs/
 
 # Third-party LibRecommender source — installed separately
 external/librecommender/
+
+# Ad-hoc backup folders created during rerun cleanups (large model/data dumps)
+_backup*/
+
+# Office lock files (created while a file is open in Excel/Word)
+~$*

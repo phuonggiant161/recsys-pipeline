@@ -6,7 +6,7 @@ Pipeline:
     RecBole train/valid/test .inter (user_id, item_id only)
     + global item content embeddings (data/processed/item_embeddings/*.parquet)
     -> LibRecommender DatasetFeat (item dense features)
-    -> TwoTower, manual epoch loop with early stopping on validation NDCG@10
+    -> TwoTower, manual epoch loop with early stopping on validation NDCG@20
     -> reload BEST checkpoint (never the last epoch)
     -> Top-K recommendation TSV for TEST users (train+valid masked, test kept)
     -> register selected artifact (framework="librecommender")
@@ -235,7 +235,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max-epochs", type=int, default=100)
     p.add_argument("--patience", type=int, default=10)
     p.add_argument("--min-delta", type=float, default=0.0,
-                    help="Minimum NDCG@10 improvement to reset patience (default 0 = strict >).")
+                    help="Minimum NDCG@20 improvement to reset patience (default 0 = strict >).")
     p.add_argument("--embed-size", type=int, default=128, help="TwoTower tower output embedding size.")
     p.add_argument("--batch-size", type=int, default=2048)
     p.add_argument("--learning-rate", type=float, default=0.0001)
@@ -349,7 +349,7 @@ def main() -> None:
 
     fit_verbose = 0 if args.noprogressbar else 1
 
-    # ── Manual epoch loop with early stopping on validation NDCG@10 ──────────
+    # ── Manual epoch loop with early stopping on validation NDCG@20 ──────────
     best_ndcg = float("-inf")
     best_epoch = None
     no_improve = 0
@@ -378,7 +378,7 @@ def main() -> None:
         # correctly across fit() calls (model_built/trainer are reused, the
         # graph is never rebuilt) -- only the NumPy inference cache used by
         # recommend_user()/predict()/evaluate() was going stale. Confirmed
-        # empirically: without this reset, validation NDCG@10 was frozen at
+        # empirically: without this reset, validation NDCG@20 was frozen at
         # the epoch-1 value for 11 straight epochs on hm_random_keep0.1.
         model.user_embeds_np = None
         model.item_embeds_np = None
@@ -415,7 +415,7 @@ def main() -> None:
             data=valid_data,
             neg_sampling=True,  # required for positive-only labels; unused by listwise ndcg itself
             metrics=["ndcg"],
-            k=10,
+            k=20,
             sample_user_num=None,  # ALL validation users, never a sample
             seed=args.seed,
         )
@@ -433,12 +433,12 @@ def main() -> None:
 
         history_rows.append({
             "epoch": epoch,
-            "valid_ndcg10": round(valid_ndcg, 6),
+            "valid_ndcg20": round(valid_ndcg, 6),
             "is_best": int(is_best),
             "no_improve": no_improve,
         })
         print(
-            f"  [epoch {epoch:3d}] valid_ndcg@10={valid_ndcg:.6f}  "
+            f"  [epoch {epoch:3d}] valid_ndcg@20={valid_ndcg:.6f}  "
             f"best={best_ndcg:.6f} (epoch {best_epoch})  "
             f"no_improve={no_improve}/{args.patience}  "
             f"emb_norm(user={cur_emb_norms[0]:.4f}, item={cur_emb_norms[1]:.4f})"
@@ -451,10 +451,10 @@ def main() -> None:
         stopped_reason = f"max_epochs_reached({args.max_epochs})"
 
     elapsed = time.time() - t_start
-    print(f"  Training finished: best_epoch={best_epoch} best_valid_ndcg10={best_ndcg:.6f} "
+    print(f"  Training finished: best_epoch={best_epoch} best_valid_ndcg20={best_ndcg:.6f} "
           f"stopped_reason={stopped_reason} elapsed={elapsed:.1f}s")
 
-    pd.DataFrame(history_rows, columns=["epoch", "valid_ndcg10", "is_best", "no_improve"]).to_csv(
+    pd.DataFrame(history_rows, columns=["epoch", "valid_ndcg20", "is_best", "no_improve"]).to_csv(
         history_path, sep="\t", index=False
     )
     print(f"  Training history: {history_path}")
@@ -479,14 +479,14 @@ def main() -> None:
     assert np.isfinite(np.asarray(sanity_scores)).all(), "sanity check failed: non-finite predict() scores"
     print(f"  [OK] sanity check on reloaded model: user={sanity_user} -> {len(sanity_items)} recs, scores finite")
 
-    # ── Optional reference-only NDCG@10 on TEST (NOT the thesis final metric) ─
+    # ── Optional reference-only NDCG@20 on TEST (NOT the thesis final metric) ─
     ref_eval = evaluate(
         model=best_model, data=test_data, neg_sampling=True,
-        metrics=["ndcg"], k=10, sample_user_num=None, seed=args.seed,
+        metrics=["ndcg"], k=20, sample_user_num=None, seed=args.seed,
     )
-    reference_test_ndcg10 = float(ref_eval["ndcg"])
+    reference_test_ndcg20 = float(ref_eval["ndcg"])
     print(
-        f"  [REFERENCE ONLY] LibRecommender test ndcg@10={reference_test_ndcg10:.6f} "
+        f"  [REFERENCE ONLY] LibRecommender test ndcg@20={reference_test_ndcg20:.6f} "
         f"-- NOT the thesis final result; final evaluation will use the RecBole "
         f"external recommendation evaluator on the Top-K TSV produced below."
     )
@@ -495,9 +495,9 @@ def main() -> None:
         "dataset": dataset,
         "model": MODEL_NAME,
         "best_epoch": best_epoch,
-        "best_valid_ndcg10": round(best_ndcg, 6),
+        "best_valid_ndcg20": round(best_ndcg, 6),
         "stopped_reason": stopped_reason,
-        "reference_only_test_ndcg10": round(reference_test_ndcg10, 6),
+        "reference_only_test_ndcg20": round(reference_test_ndcg20, 6),
         "reference_only_note": "NOT the thesis final metric -- final evaluation uses the RecBole external evaluator on the recommendation TSV.",
         "hyperparameters": {
             "max_epochs": args.max_epochs, "patience": args.patience, "min_delta": args.min_delta,
@@ -586,7 +586,7 @@ def main() -> None:
         selected_artifact=str(recs_path),
         artifact_type="recommendations",
         selected_iteration=best_epoch,
-        best_valid_ndcg10=round(best_ndcg, 6),
+        best_valid_ndcg20=round(best_ndcg, 6),
     )
     _print_artifact(artifact_meta)
 

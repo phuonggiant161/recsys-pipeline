@@ -73,7 +73,7 @@ topk:
   - 20
   - 50
 
-valid_metric: NDCG@10
+valid_metric: NDCG@20
 valid_metric_bigger: true
 metric_decimal_place: 10
 

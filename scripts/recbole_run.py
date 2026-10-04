@@ -4,9 +4,11 @@ Run RecBole experiments via run_recbole() API and save metrics to TSV.
 Usage:
     python scripts/recbole_run.py --dataset amazon_random_keep0.5 --model BPR --overwrite
     python scripts/recbole_run.py --dataset amazon_random_keep0.5 --model ItemKNN --overwrite
+    python scripts/recbole_run.py --dataset amazon_random_keep0.5 --model SASRec --overwrite
     python scripts/recbole_run.py --dataset amazon_random_keep0.5 --model all --overwrite
     python scripts/recbole_run.py --all --model BPR --overwrite
     python scripts/recbole_run.py --all --model ItemKNN --overwrite
+    python scripts/recbole_run.py --all --model SASRec --overwrite
     python scripts/recbole_run.py --all --model all --overwrite
     python scripts/recbole_run.py --all --model ItemKNN --filter amazon_random_keep0.5 --overwrite
 """
@@ -48,6 +50,7 @@ _MODEL_TO_YAML: dict[str, Path] = {
     "ItemKNN": _PROJECT_ROOT / "configs" / "recbole" / "itemknn.yml",
     "NeuMF":   _PROJECT_ROOT / "configs" / "recbole" / "neumf.yml",
     "LightGCN": _PROJECT_ROOT / "configs" / "recbole" / "lightgcn.yml",
+    "SASRec":  _PROJECT_ROOT / "configs" / "recbole" / "sasrec.yaml",
 }
 _ALL_MODELS = list(_MODEL_TO_YAML.keys())
 

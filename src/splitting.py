@@ -202,6 +202,159 @@ def userwise_temporal_holdout_with_coverage(
     return remainder_df, holdout_df
 
 
+def userwise_temporal_LOO_with_coverage(
+    df: pd.DataFrame,
+    user_col: str,
+    item_col: str,
+    timestamp_col: str,
+    holdout_size: float | None = None,
+    split_name: str = "holdout",
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Per-user temporal leave-one-out split with protected user+item coverage.
+
+    For each user u:
+        last_u = u's single most recent interaction (by timestamp, __row_id tie-break)
+        holdout_u = [last_u]  if last_u is NOT a protected row
+                    []        otherwise (no fallback to an earlier interaction)
+
+    `holdout_size` is accepted for signature parity with
+    userwise_temporal_holdout_with_coverage() and is ignored -- LOO always
+    takes at most 1 interaction per user, never a ratio.
+
+    This is the desired=1 special case of userwise_temporal_holdout_with_coverage()'s
+    "suffix after the last protected interaction" rule: since a user's most
+    recent interaction is the only candidate ever considered, protected rows
+    that are NOT the most recent interaction have no effect (train simply
+    keeps everything except the single holdout row); a protected row that IS
+    the most recent interaction blocks holdout entirely for that user (no
+    interaction is placed into holdout) rather than falling back to an
+    earlier, unprotected interaction.
+
+    Guarantees
+    ----------
+    * remainder contains every user and every item from df.
+    * holdout users and items are subsets of remainder users and items.
+    * holdout has at most 1 row per user.
+    * len(remainder) + len(holdout) == len(df).
+    * No user has zero interactions in remainder.
+    * For every user with a holdout row, it is chronologically after every
+      remainder row for that user (including the last protected interaction).
+    """
+    work = df.reset_index(drop=True).copy()
+    work["__row_id"] = np.arange(len(work), dtype=np.int64)
+
+    # Fail-fast: unparseable timestamps would silently shrink the dataset.
+    parsed_ts = pd.to_datetime(work[timestamp_col], errors="coerce")
+    n_bad = int(parsed_ts.isna().sum())
+    if n_bad > 0:
+        raise ValueError(
+            f"[{split_name}] {n_bad:,} row(s) have unparseable timestamps in "
+            f"column '{timestamp_col}'. Fix the data before splitting."
+        )
+    work[timestamp_col] = parsed_ts
+
+    protected_ids = build_protected_row_ids(work, user_col, item_col, timestamp_col)
+    cols_out = df.columns.tolist()
+
+    holdout_ids: list[int] = []
+    n_users_with_holdout = 0
+    n_users_single_interaction = 0
+    n_users_blocked_by_protected = 0
+
+    for _, user_df in work.groupby(user_col, sort=False):
+        user_sorted = user_df.sort_values(
+            [timestamp_col, "__row_id"], kind="stable"
+        )
+        row_ids = user_sorted["__row_id"].tolist()
+        n_u = len(row_ids)
+
+        if n_u == 1:
+            # Single-interaction users: that one row is always the
+            # user-coverage protected row, so it can never be held out.
+            n_users_single_interaction += 1
+            continue
+
+        most_recent = row_ids[-1]
+        if most_recent in protected_ids:
+            # Most recent interaction must stay in train -- no fallback to
+            # an earlier, unprotected interaction.
+            n_users_blocked_by_protected += 1
+            continue
+
+        holdout_ids.append(most_recent)
+        n_users_with_holdout += 1
+
+    n_users_total = work[user_col].nunique()
+    n_users_without_holdout = n_users_total - n_users_with_holdout
+
+    holdout_id_set = set(holdout_ids)
+    holdout_mask   = work["__row_id"].isin(holdout_id_set)
+    remainder_df   = work.loc[~holdout_mask, cols_out].reset_index(drop=True)
+    holdout_df     = work.loc[holdout_mask,  cols_out].reset_index(drop=True)
+
+    actual_overall_ratio = len(holdout_df) / len(df) if len(df) > 0 else 0.0
+
+    # ── Diagnostics ───────────────────────────────────────────────────────────
+    print(
+        f"  [{split_name}] (LOO) "
+        f"users={n_users_total:,} | "
+        f"users_with_holdout={n_users_with_holdout:,} | "
+        f"users_without_holdout={n_users_without_holdout:,} | "
+        f"users_single_interaction={n_users_single_interaction:,} | "
+        f"users_blocked_by_protected={n_users_blocked_by_protected:,}"
+    )
+    print(
+        f"  [{split_name}] (LOO) "
+        f"holdout_rows={len(holdout_df):,} | "
+        f"actual_overall_ratio={actual_overall_ratio:.4f}"
+    )
+
+    # ── Assertions ────────────────────────────────────────────────────────────
+    assert len(remainder_df) + len(holdout_df) == len(df), (
+        f"BUG [{split_name}]: row count mismatch — "
+        f"remainder={len(remainder_df)} + holdout={len(holdout_df)} "
+        f"!= input={len(df)}"
+    )
+    remainder_row_ids = set(work.loc[~holdout_mask, "__row_id"])
+    assert holdout_id_set.isdisjoint(remainder_row_ids), (
+        f"BUG [{split_name}]: overlap between remainder and holdout row IDs"
+    )
+    missing_u = set(df[user_col]) - set(remainder_df[user_col])
+    assert not missing_u, (
+        f"BUG [{split_name}]: remainder missing users: {missing_u}"
+    )
+    missing_i = set(df[item_col]) - set(remainder_df[item_col])
+    assert not missing_i, (
+        f"BUG [{split_name}]: remainder missing items: {missing_i}"
+    )
+    if len(holdout_df) > 0:
+        extra_u = set(holdout_df[user_col]) - set(remainder_df[user_col])
+        assert not extra_u, (
+            f"BUG [{split_name}]: holdout has users not in remainder: {extra_u}"
+        )
+        extra_i = set(holdout_df[item_col]) - set(remainder_df[item_col])
+        assert not extra_i, (
+            f"BUG [{split_name}]: holdout has items not in remainder: {extra_i}"
+        )
+        holdout_counts = holdout_df.groupby(user_col).size()
+        over = holdout_counts[holdout_counts > 1]
+        assert over.empty, (
+            f"BUG [{split_name}]: holdout has >1 row for users: {over.to_dict()}"
+        )
+        h_min = holdout_df.groupby(user_col)[timestamp_col].min()
+        r_max = remainder_df.groupby(user_col)[timestamp_col].max()
+        for u, min_h in h_min.items():
+            max_r = r_max.get(u)
+            if max_r is not None:
+                assert max_r <= min_h, (
+                    f"BUG [{split_name}]: temporal violation for user {u}: "
+                    f"max(remainder)={max_r} > min(holdout)={min_h}"
+                )
+
+    return remainder_df, holdout_df
+
+
 def temporal_global_holdout_with_coverage(
     df: pd.DataFrame,
     user_col: str,

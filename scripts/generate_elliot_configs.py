@@ -139,7 +139,7 @@ def _funksvd_models_yaml(_: str) -> str:
     FunkSVD:
       meta:
         save_recs: True
-        validation_metric: nDCG@10
+        validation_metric: nDCG@20
         validation_rate: 1
       epochs: 100
       batch_size: 512
@@ -148,7 +148,7 @@ def _funksvd_models_yaml(_: str) -> str:
       reg_w: 0.1
       reg_b: 0.001
       early_stopping:
-        monitor: nDCG@10
+        monitor: nDCG@20
         mode: max
         patience: 10
         min_delta: 0.0001

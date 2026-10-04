@@ -1,9 +1,0 @@
-{
-  "framework": "librecommender",
-  "dataset": "hm_tail_keep0.1",
-  "model": "TwoTower",
-  "selected_artifact": "D:\\recsys-pipeline\\results\\librecommender\\hm_tail_keep0.1\\recs\\TwoTower.tsv",
-  "artifact_type": "recommendations",
-  "selected_iteration": 40,
-  "best_valid_ndcg10": 0.099854
-}

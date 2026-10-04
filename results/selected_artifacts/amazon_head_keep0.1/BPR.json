@@ -2,6 +2,6 @@
   "framework": "recbole",
   "dataset": "amazon_head_keep0.1",
   "model": "BPR",
-  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\amazon_head_keep0.1\\BPR\\BPR-Aug-17-2026_09-53-30.pth",
+  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\amazon_head_keep0.1\\BPR\\BPR-Oct-03-2026_09-28-16.pth",
   "artifact_type": "checkpoint"
 }

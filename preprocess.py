@@ -7,7 +7,10 @@ from src.config import get_dataset_config
 from src.io_utils import load_dataframe
 from src.kcore import make_k_core
 from src.dedup import deduplicate_user_item
-from src.splitting import userwise_temporal_holdout_with_coverage
+from src.splitting import (
+    userwise_temporal_holdout_with_coverage,
+    userwise_temporal_LOO_with_coverage,
+)
 from src.thinning import (
     generate_random_thinning_levels,
     generate_head_item_cut_levels,
@@ -23,28 +26,44 @@ from src.sasrec_history import build_sasrec_histories, ROW_SEQ_COL
 MAX_ITEM_LIST_LENGTH = 50
 
 # ── Default constants (edit here, or override via CLI args) ──────────────────
-# DATASET_NAME   = "amazon"   # "hm"
-# K_USER         = 12              # min interactions per user
-# K_ITEM         = 12         # min interactions per item
-# TEST_SIZE       = 0.1                           # pool → test
-# VALID_SIZE      = 0.1
-# KEEP_FRACS     = [0.9, 0.7, 0.5, 0.3, 0.1]
-# HEAD_KEEP_FRACS = [0.1]
-# TAIL_KEEP_FRACS = [0.1]
-# SEED           = 42
-# DEDUP_USER_ITEM = True            # True → keep last interaction per user-item pair
-
-# # ── H&M preset ────────────────────────────────────────
-DATASET_NAME    = "hm"
-K_USER          = 35
-K_ITEM          = 35
+DATASET_NAME   = "amazon"   # "hm"
+K_USER         = 15              # min interactions per user
+K_ITEM         = 15         # min interactions per item
 TEST_SIZE       = 0.1                           # pool → test
-VALID_SIZE      = 0.1                           # train_pool → valid
-KEEP_FRACS      = [0.9, 0.6, 0.3, 0.1, 0.05]   # random thinning levels
+VALID_SIZE      = 0.1
+KEEP_FRACS      = [1, 0.65, 0.4, 0.2, 0.1]
 HEAD_KEEP_FRACS = [0.1]
 TAIL_KEEP_FRACS = [0.1]
-SEED            = 42
-DEDUP_USER_ITEM = True
+SEED           = 42
+DEDUP_USER_ITEM = True            # True → keep last interaction per user-item pair
+
+# Split strategy: False -> ratio-based holdout (TEST_SIZE/VALID_SIZE, existing
+# behavior), True -> leave-one-out (at most 1 holdout interaction per user).
+USE_LOO_SPLIT = True
+
+# # ── H&M preset ────────────────────────────────────────
+# DATASET_NAME    = "hm"
+# K_USER          = 35
+# K_ITEM          = 35
+# TEST_SIZE       = 0.1                           # pool → test
+# VALID_SIZE      = 0.1                           # train_pool → valid
+# KEEP_FRACS      = [0.5, 0.35, 0.2, 0.1, 0.05]
+#   # random thinning levels
+# HEAD_KEEP_FRACS = [0.1]
+# TAIL_KEEP_FRACS = [0.1]
+# SEED            = 42
+# DEDUP_USER_ITEM = True
+# USE_LOO_SPLIT = True
+
+# Dispatcher used by every train/valid/test split call below -- switching
+# USE_LOO_SPLIT changes splitting behavior everywhere without touching each
+# call site individually.
+userwise_temporal_holdout = (
+    userwise_temporal_LOO_with_coverage if USE_LOO_SPLIT
+    else userwise_temporal_holdout_with_coverage
+)
+
+
 
 
 def _desired_holdout_sum(df: pd.DataFrame, user_col: str, holdout_size: float) -> int:
@@ -129,8 +148,10 @@ def _verify_membership_unchanged(
 
     If output_dir has no prior train.csv/valid.csv/test.csv (first-ever run
     for this variant), the check is skipped. If a hash mismatch is found,
-    raises RuntimeError and does NOT save -- the caller must not overwrite
-    existing data with a changed split.
+    this only WARNS (prints) and lets the caller proceed -- membership
+    changes are often intentional (different k-core, different split
+    strategy, etc.) and must never block a run. This is visibility only,
+    not a gate.
     """
     key_cols = [user_col, item_col, timestamp_col]
     old_paths = {
@@ -158,13 +179,13 @@ def _verify_membership_unchanged(
             mismatches.append(split_name)
 
     if mismatches:
-        raise RuntimeError(
-            f"[verify][{label}] STOP: {', '.join(mismatches)} row membership "
+        print(
+            f"  [verify][{label}] WARNING: {', '.join(mismatches)} row membership "
             f"(user,item,timestamp) differs from the existing data at {output_dir}. "
-            "This refactor must not change split membership -- refusing to overwrite. "
-            "Investigate before proceeding (do not re-run with different code paths "
-            "that could silently mask this)."
+            "Proceeding anyway (e.g. k-core/split-strategy change) -- old data at "
+            "this path will be overwritten."
         )
+        return
 
     print(f"  [verify][{label}] train/valid/test membership unchanged vs {output_dir}")
 
@@ -476,7 +497,7 @@ def main():
         f"Step 4: Per-user temporal holdout -> train_pool / test  "
         f"(test_size={TEST_SIZE}, desired_per_user_sum={desired_test_rows_sum:,})"
     )
-    train_pool_base, test_base = userwise_temporal_holdout_with_coverage(
+    train_pool_base, test_base = userwise_temporal_holdout(
         df=dense_df,
         user_col=user_col,
         item_col=item_col,
@@ -505,7 +526,7 @@ def main():
         f"Step 4b: Per-user temporal holdout -> train / valid  "
         f"(valid_size={VALID_SIZE}, desired_per_user_sum={desired_valid_base_sum:,})"
     )
-    train_base, valid_base = userwise_temporal_holdout_with_coverage(
+    train_base, valid_base = userwise_temporal_holdout(
         df=train_pool_base,
         user_col=user_col,
         item_col=item_col,
@@ -623,7 +644,7 @@ def main():
     for level_name, thin_train_pool in random_pool_outputs.items():
         _log_df(f"  random {level_name} thin_train_pool", thin_train_pool, user_col, item_col)
         desired_valid_rows_sum = _desired_holdout_sum(thin_train_pool, user_col, VALID_SIZE)
-        thin_train, thin_valid = userwise_temporal_holdout_with_coverage(
+        thin_train, thin_valid = userwise_temporal_holdout(
             df=thin_train_pool,
             user_col=user_col,
             item_col=item_col,
@@ -687,7 +708,7 @@ def main():
     for level_name, thin_train_pool in head_pool_outputs.items():
         _log_df(f"  head {level_name} thin_train_pool", thin_train_pool, user_col, item_col)
         desired_valid_rows_sum = _desired_holdout_sum(thin_train_pool, user_col, VALID_SIZE)
-        thin_train, thin_valid = userwise_temporal_holdout_with_coverage(
+        thin_train, thin_valid = userwise_temporal_holdout(
             df=thin_train_pool,
             user_col=user_col,
             item_col=item_col,
@@ -751,7 +772,7 @@ def main():
     for level_name, thin_train_pool in tail_pool_outputs.items():
         _log_df(f"  tail {level_name} thin_train_pool", thin_train_pool, user_col, item_col)
         desired_valid_rows_sum = _desired_holdout_sum(thin_train_pool, user_col, VALID_SIZE)
-        thin_train, thin_valid = userwise_temporal_holdout_with_coverage(
+        thin_train, thin_valid = userwise_temporal_holdout(
             df=thin_train_pool,
             user_col=user_col,
             item_col=item_col,

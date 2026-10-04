@@ -2,6 +2,6 @@
   "framework": "recbole",
   "dataset": "hm_tail_keep0.1",
   "model": "BPR",
-  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\hm_tail_keep0.1\\BPR\\BPR-Aug-17-2026_22-28-02.pth",
+  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\hm_tail_keep0.1\\BPR\\BPR-Oct-03-2026_11-55-51.pth",
   "artifact_type": "checkpoint"
 }

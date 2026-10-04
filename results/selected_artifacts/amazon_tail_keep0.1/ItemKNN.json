@@ -2,6 +2,6 @@
   "framework": "recbole",
   "dataset": "amazon_tail_keep0.1",
   "model": "ItemKNN",
-  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\amazon_tail_keep0.1\\ItemKNN\\ItemKNN-Aug-17-2026_02-08-41.pth",
+  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\amazon_tail_keep0.1\\ItemKNN\\ItemKNN-Oct-03-2026_12-08-43.pth",
   "artifact_type": "checkpoint"
 }

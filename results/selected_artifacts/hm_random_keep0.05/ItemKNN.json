@@ -2,6 +2,6 @@
   "framework": "recbole",
   "dataset": "hm_random_keep0.05",
   "model": "ItemKNN",
-  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\hm_random_keep0.05\\ItemKNN\\ItemKNN-Aug-17-2026_02-11-29.pth",
+  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\hm_random_keep0.05\\ItemKNN\\ItemKNN-Oct-03-2026_12-11-11.pth",
   "artifact_type": "checkpoint"
 }

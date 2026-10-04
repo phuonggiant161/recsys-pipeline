@@ -2,6 +2,6 @@
   "framework": "recbole",
   "dataset": "hm_dedup_base_split",
   "model": "ItemKNN",
-  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\hm_dedup_base_split\\ItemKNN\\ItemKNN-Aug-17-2026_02-10-01.pth",
+  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\hm_dedup_base_split\\ItemKNN\\ItemKNN-Oct-03-2026_12-09-41.pth",
   "artifact_type": "checkpoint"
 }

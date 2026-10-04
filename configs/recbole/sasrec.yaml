@@ -39,7 +39,7 @@ learning_rate: 0.001
 # evaluation
 metrics: [Precision, Recall, NDCG, MAP, MRR, Hit]
 topk: [10,20,50]
-valid_metric: NDCG@10
+valid_metric: NDCG@20
 
 eval_args:
   order: TO
