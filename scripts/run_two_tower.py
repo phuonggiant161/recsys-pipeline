@@ -21,6 +21,9 @@ Must be run with the LibRecommender environment, e.g.:
 Usage:
     python scripts/run_two_tower.py --dataset hm_random_keep0.1
     python scripts/run_two_tower.py --dataset amazon_random_keep0.5 --overwrite
+    python scripts/run_two_tower.py --all --overwrite
+    python scripts/run_two_tower.py --all --filter amazon --overwrite
+    python scripts/run_two_tower.py --all --temperature -0.1 --learning-rate 0.001 --overwrite
 """
 import argparse
 import json
@@ -220,13 +223,43 @@ def set_all_seeds(seed: int) -> None:
     tf.compat.v1.set_random_seed(seed)
 
 
+# ── Dataset discovery (for --all) ──────────────────────────────────────────────
+
+def _discover_datasets(filter_str: str | None) -> list[str]:
+    """Return sorted dataset names under data/recbole/ that have train/valid/test .inter files."""
+    if not RECBOLE_DATA_ROOT.exists():
+        raise SystemExit(
+            f"ERROR: {RECBOLE_DATA_ROOT} does not exist.\n"
+            "  Run: python scripts/recbole_prepare_data.py --all --overwrite"
+        )
+    datasets = []
+    for d in sorted(RECBOLE_DATA_ROOT.iterdir()):
+        if not d.is_dir():
+            continue
+        name = d.name
+        if filter_str and filter_str not in name:
+            continue
+        missing = [s for s in ["train", "valid", "test"] if not (d / f"{name}.{s}.inter").exists()]
+        if missing:
+            print(f"  [SKIP] dataset={name}  reason=missing inter files: {missing}")
+        else:
+            datasets.append(name)
+    if not datasets:
+        suffix = f" matching '{filter_str}'" if filter_str else ""
+        raise SystemExit(f"No valid datasets found in {RECBOLE_DATA_ROOT}{suffix}")
+    return datasets
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Train LibRecommender TwoTower on existing RecBole splits with TF-IDF/SVD item content embeddings."
     )
-    p.add_argument("--dataset", required=True, help="Dataset variant name, e.g. hm_random_keep0.1")
+    group = p.add_mutually_exclusive_group(required=True)
+    group.add_argument("--dataset", help="Dataset variant name, e.g. hm_random_keep0.1")
+    group.add_argument("--all", action="store_true", help="Run on all valid datasets in data/recbole/")
+    p.add_argument("--filter", default=None, help="(with --all) only datasets whose name contains this substring")
     p.add_argument("--embedding-path", default=None, type=Path,
                     help="Override auto-resolved item embedding parquet path.")
     p.add_argument("--overwrite", action="store_true",
@@ -238,7 +271,10 @@ def parse_args() -> argparse.Namespace:
                     help="Minimum NDCG@20 improvement to reset patience (default 0 = strict >).")
     p.add_argument("--embed-size", type=int, default=128, help="TwoTower tower output embedding size.")
     p.add_argument("--batch-size", type=int, default=2048)
-    p.add_argument("--learning-rate", type=float, default=0.0001)
+    p.add_argument("--learning-rate", type=float, default=0.001)
+    p.add_argument("--temperature", type=float, default=0.1,
+                    help="Softmax loss temperature (logits are divided by this before softmax). "
+                         "<=0 treats it as a learnable variable, trained jointly with the model.")
     p.add_argument("--topk", type=int, default=50)
     p.add_argument("--seed", type=int, default=2020)
     p.add_argument("--rec-batch-size", type=int, default=256,
@@ -246,12 +282,10 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ── Single-dataset run ──────────────────────────────────────────────────────────
 
-def main() -> None:
-    args = parse_args()
-    dataset = args.dataset
-
+def run_one(dataset: str, args: argparse.Namespace) -> str:
+    """Train + evaluate TwoTower for one dataset. Returns 'ok' or 'skip'."""
     model_dir = RESULTS_ROOT / dataset / "model" / MODEL_NAME
     training_dir = RESULTS_ROOT / dataset / "training"
     recs_dir = RESULTS_ROOT / dataset / "recs"
@@ -261,14 +295,14 @@ def main() -> None:
 
     if recs_path.exists() and not args.overwrite:
         print(f"[SKIP] {recs_path} already exists (use --overwrite to retrain).")
-        return
+        return "skip"
 
     print(f"\n[RUN TWO-TOWER] dataset={dataset}")
     print(
         f"  hyperparameters: max_epochs={args.max_epochs} patience={args.patience} "
         f"min_delta={args.min_delta} embed_size={args.embed_size} batch_size={args.batch_size} "
-        f"lr={args.learning_rate} topk={args.topk} seed={args.seed} "
-        f"hidden_units={HIDDEN_UNITS} loss_type=softmax"
+        f"lr={args.learning_rate} temperature={args.temperature} topk={args.topk} seed={args.seed} "
+        f"hidden_units={HIDDEN_UNITS} loss_type=softmax norm_embed=True"
     )
     set_all_seeds(args.seed)
 
@@ -343,9 +377,12 @@ def main() -> None:
         lr=args.learning_rate,
         batch_size=args.batch_size,
         hidden_units=HIDDEN_UNITS,
+        norm_embed=True,
+        temperature=args.temperature,
         seed=args.seed,
     )
-    print(f"  norm_embed (library default, unchanged): {model.norm_embed}")
+    print(f"  norm_embed={model.norm_embed}  temperature={args.temperature}"
+          f"{' (learned, <=0)' if args.temperature <= 0 else ''}")
 
     fit_verbose = 0 if args.noprogressbar else 1
 
@@ -502,9 +539,14 @@ def main() -> None:
         "hyperparameters": {
             "max_epochs": args.max_epochs, "patience": args.patience, "min_delta": args.min_delta,
             "embed_size": args.embed_size, "batch_size": args.batch_size,
-            "learning_rate": args.learning_rate, "topk": args.topk, "seed": args.seed,
+            "learning_rate": args.learning_rate, "temperature": args.temperature,
+            "topk": args.topk, "seed": args.seed,
             "hidden_units": list(HIDDEN_UNITS), "loss_type": "softmax",
             "norm_embed": bool(best_model.norm_embed),
+            "learned_temperature": (
+                float(best_model.sess.run(best_model.temperature_var))
+                if hasattr(best_model, "temperature_var") else None
+            ),
         },
         "embedding_path": str(embedding_path),
     }
@@ -590,6 +632,16 @@ def main() -> None:
     )
     _print_artifact(artifact_meta)
 
+    # ── Release TF session/graph before the next dataset (--all loop) ───────
+    try:
+        best_model.sess.close()
+    except Exception:
+        pass
+    del best_model
+    tf.compat.v1.reset_default_graph()
+
+    return "ok"
+
 
 def _validate_recommendations(
     rec_df: pd.DataFrame,
@@ -668,6 +720,42 @@ def _validate_recommendations(
         f"{len(rec_df):,} rows, no train/valid leakage, no duplicates, "
         f"descending scores, all items in catalog."
     )
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    args = parse_args()
+
+    datasets = [args.dataset] if args.dataset else _discover_datasets(args.filter)
+
+    success = skip = error = 0
+    errors: list[tuple[str, str]] = []
+
+    for dataset in datasets:
+        print(f"\n{'='*60}")
+        print(f"dataset={dataset}")
+        print("="*60)
+        try:
+            status = run_one(dataset, args)
+            if status == "skip":
+                skip += 1
+            else:
+                success += 1
+        except Exception as e:
+            msg = str(e)
+            print(f"  [ERROR] {msg}")
+            errors.append((dataset, msg))
+            error += 1
+
+    if len(datasets) > 1:
+        print(f"\n{'='*60}")
+        print(f"Summary: {success} success, {skip} skip, {error} error")
+        if errors:
+            for ds, msg in errors:
+                print(f"  FAIL  dataset={ds}")
+                print(f"        {msg.splitlines()[0][:120]}")
+        print("="*60)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,9 @@
+{
+  "framework": "librecommender",
+  "dataset": "amazon_random_keep1",
+  "model": "TwoTower",
+  "selected_artifact": "D:\\recsys-pipeline\\results\\librecommender\\amazon_random_keep1\\recs\\TwoTower.tsv",
+  "artifact_type": "recommendations",
+  "selected_iteration": 43,
+  "best_valid_ndcg20": 0.022999
+}
