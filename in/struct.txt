@@ -1,0 +1,44 @@
+0 Normal  None '9.6.1 Kết quả thí nghiệm' 
+1 Normal  None 'Liệt kê những hình vẽ và bảng dữ liệu kết quả.' 
+2 Normal IMG None '' 
+3 Normal  CENTER (1) 'Hình 6.1. nDCG@20 vs AIU' [('Hình 6.1. nDCG@20 vs', None)]
+4 Normal IMG None '' 
+5 Normal  CENTER (1) 'Hình 6.2. nDCG@20 vs AIU – nhóm U1' [('Hình 6.2. nDCG@20 vs', None)]
+6 Normal IMG None '' 
+7 Normal  CENTER (1) 'Hình 6.3. nDCG@20 vs AIU – nhóm U2-5' [('Hình 6.3. nDCG@20 vs', None)]
+8 Normal IMG None '' 
+9 Normal  CENTER (1) 'Hình 6.4. nDCG@20 vs AIU – nhóm pop1' [('Hình 6.4. nDCG@20 vs', None)]
+10 Normal IMG None '' 
+11 Normal  CENTER (1) 'Hình 6.5. nDCG@20 vs AIU – nhóm pop2-5' [('Hình 6.5. nDCG@20 vs', None)]
+13 Normal  CENTER (1) 'Bảng 1. nDCG và Recall @20, @50 vs AIU' [('Bảng', True), (' 1. ', True), ('nDCG ', True), ('và Recall @20, @', True)]
+14 tbl
+17 Normal  CENTER (1) 'Bảng 2. ndcg@20 vs AIU cho mỗi nhóm u1,..u41+, pop1, ...,pop41+, Amazon' [('Bảng', True), (' 2. ndcg@20 vs AIU c', True), ('u41+, pop1, ...,pop4', True)]
+18 tbl
+20 Normal  CENTER (1) 'Bảng 3. ndcg@20 vs AIU cho mỗi nhóm u1,..u41+, pop1, ...,pop41+, HM' [('Bảng', True), (' ', True), ('3', True), ('. ndcg@20 vs AIU cho', True)]
+21 tbl
+24 Normal  CENTER (1) 'Bảng 4. Borda count' [('Bảng', True), (' 4. Borda count', True)]
+25 tbl
+27 Normal  CENTER (1) 'Bảng 5. Borda count u<5' [('Bảng 5.', True), (' Borda count u<5', True)]
+28 tbl
+30 Normal  CENTER (1) 'Bảng 6. Borda count u5+' [('Bảng 6.', True), (' Borda count u5+', True)]
+31 tbl
+33 Normal  CENTER (1) 'Bảng 7. Borda count per user group' [('Bảng 7.', True), (' Borda count per use', True)]
+34 tbl
+36 Normal  CENTER (1) 'Bảng 8. Borda count per item popularity' [('Bảng 8.', True), (' Borda count ', True), ('per item popularity', True)]
+37 tbl
+41 Normal IMG CENTER (1) '' 
+42 Normal IMG CENTER (1) '' 
+43 Normal  CENTER (1) 'Hình 6.6. Item Coverage, Diversity vs AIU' [('Hình 6.6. Item Cover', None)]
+44 Normal IMG CENTER (1) '' 
+45 Normal  CENTER (1) 'Hình 6.7. nDCG@20 vs Item Gini' [('Hình 6.7. nDCG@20 vs', None)]
+46 Normal IMG CENTER (1) '' 
+47 Normal  CENTER (1) 'Hình 6.8. nDCG@20 vs Item Gini – nhóm pop1' [('Hình 6.8. nDCG@20 vs', None)]
+50 Normal  None '6.2 Phân tích và thảo luận' 
+51 Normal  None 'a) Hiệu năng của các thuật toán thay đổi như thế nào khi độ thưa dữ liệu tăng/gi' 
+52 Normal  None 'b) Những thuật toán nào có ưu thế đối với coldstart users?' 
+53 Normal  None 'c) Những thuật toán nào có ưu thế đối  với longtail items?' 
+54 Normal  None 'd) Việc mất cân bằng của phân bố tương tác theo sản phẩm ảnh hưởng đến hiệu năng' 
+55 Normal  None 'e) Khuyến nghị: theo hình vẽ borda count rankings per overall sparsity and colds' 
+56 Normal  None 'f) Các nhận xét khác: bất cứ nhận xét  nào khác về kết quả thí nghiệm' 
+62 sectPr
+6.5

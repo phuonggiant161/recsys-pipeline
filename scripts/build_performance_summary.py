@@ -77,6 +77,12 @@ SPARSITY_OUT = [
     "coldstart_user_pct", "coldstart_item_pct",
 ]
 
+# Display-only rename applied at the Excel-writing boundary (write_excel()).
+# Internal column names (oss_pct/uss/iss) are kept everywhere else so that
+# the data/reports/*_summary.csv fallback (try_sparsity_from_reports, which
+# matches against those CSVs' real column names) keeps working unchanged.
+SPARSITY_DISPLAY_RENAME = {"oss_pct": "MD", "uss": "AIU", "iss": "AII"}
+
 # Default expected framework(s) per model — used ONLY when the model is not
 # detected in any framework from actual data AND no CLI override is given.
 DEFAULT_MODEL_FRAMEWORKS: dict[str, list[str]] = {
@@ -935,6 +941,7 @@ def write_excel(sheets: dict[str, pd.DataFrame], output_path: Path):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         for name, df in sheets.items():
+            df = df.rename(columns=SPARSITY_DISPLAY_RENAME)
             df.to_excel(writer, sheet_name=name, index=False)
             _autofit(writer.sheets[name])
     print(f"\nWritten: {output_path}")

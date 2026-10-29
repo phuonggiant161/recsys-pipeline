@@ -4,6 +4,6 @@
   "model": "TwoTower",
   "selected_artifact": "D:\\recsys-pipeline\\results\\librecommender\\hm_tail_keep0.1\\recs\\TwoTower.tsv",
   "artifact_type": "recommendations",
-  "selected_iteration": 27,
-  "best_valid_ndcg20": 0.075585
+  "selected_iteration": 10,
+  "best_valid_ndcg20": 0.105938
 }

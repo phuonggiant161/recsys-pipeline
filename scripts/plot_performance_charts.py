@@ -2,16 +2,22 @@
 Plot performance charts from the unified summary workbook.
 
 Chart groups:
-  random               — main metrics vs OSS/USS/ISS across random keep_fracs
-  coldstart_u1         — Recall/nDCG_u1 vs OSS/USS/ISS
-  coldstart_pop1       — Recall/nDCG_pop1 vs USS
+  random               — main metrics vs MD/AIU/AII across random keep_fracs
+  coldstart_user        — Recall/nDCG for cold-start user groups (u1, u2_5) vs MD/AIU/AII
+  coldstart_pop         — Recall/nDCG_pop1 vs AIU
   gini                 — main metrics vs item/user Gini
   beyond_accuracy      — coverage/popularity/diversity metrics
   coldstart_groups     — per-experiment categorical group charts +
-                         popularity/user cross-variant charts (USS, ItemGini);
+                         popularity/user cross-variant charts (AIU, ItemGini);
                          cross-variant charts use head/random/tail @ gini_keep_frac
                          (same experiment selection as the gini group)
   group_distribution   — 100%-stacked item-popularity and user-activity bars
+
+Sparsity metric terminology (display only -- underlying dataframe columns are
+unchanged for backward compatibility):
+  oss_pct -> MD  (Matrix Density, %)
+  uss     -> AIU (Average Interactions per User)
+  iss     -> AII (Average Interactions per Item)
 
 Usage:
     python scripts/plot_performance_charts.py
@@ -43,9 +49,9 @@ plt.rcParams.update(
         "axes.spines.top":   False,
         "axes.spines.right": False,
         "font.size":         9,
-        "axes.titlesize":    10,
+        "axes.titlesize":    12,
         "axes.labelsize":    9,
-        "legend.fontsize":   8,
+        "legend.fontsize":   10,
         "legend.framealpha": 0.9,
         "figure.dpi":        150,
     }
@@ -71,6 +77,11 @@ MAIN_METRICS            = ["Precision", "Recall", "nDCG", "MAP", "MRR"]
 COLD_U1_METRICS         = ["Recall_u1", "nDCG_u1"]
 COLD_POP1_METRICS       = ["Recall_pop1", "nDCG_pop1"]
 BEYOND_ACCURACY_METRICS = ["ItemCoverage", "AveragePopularity", "Gini", "TailPercentage"]
+# Display-only rename for beyond-accuracy chart titles/filenames/y-labels --
+# the underlying dataframe column stays "Gini" (unchanged, read as-is from
+# performance_summary.xlsx). Renamed to avoid confusion with the unrelated
+# "gini" chart group (item_gini/user_gini dataset-sparsity x-axes).
+BEYOND_ACCURACY_DISPLAY = {"Gini": "Diversity"}
 POP_GROUP_SUFFIXES      = ["pop1", "pop2_5", "pop6_10", "pop11_20", "pop21_40", "pop41plus"]
 USER_GROUP_SUFFIXES     = ["u1", "u2_5", "u6_10", "u11_20", "u21_40", "u41plus"]
 POP_GROUP_LABELS        = ["Pop 1", "Pop 2-5", "Pop 6-10", "Pop 11-20", "Pop 21-40", "Pop 41+"]
@@ -79,10 +90,14 @@ RANDOM_CUTOFFS          = [10, 20, 50]
 GROUP_CUTOFF            = 20
 
 # x_key -> (df_column, display_label)
+# build_performance_summary.py now writes these sparsity columns to the
+# workbook as MD/AIU/AII directly (renamed at the Excel-writing boundary;
+# internal computation there still uses oss_pct/uss/iss for backward
+# compatibility with the data/reports/*_summary.csv fallback).
 X_AXIS_MAP = {
-    "oss": ("oss_pct", "OSS (%)"),
-    "uss": ("uss",     "USS"),
-    "iss": ("iss",     "ISS"),
+    "md":  ("MD",  "Matrix Density (%)"),
+    "aiu": ("AIU", "Average Interactions per User"),
+    "aii": ("AII", "Average Interactions per Item"),
 }
 GINI_X_AXIS_MAP = {
     "item_gini": ("item_gini", "Item Gini"),
@@ -277,7 +292,7 @@ def plot_single_metric_chart(
         return {"status": "skip", "reason": f"{x_col} absent or all-NaN"}
 
     fig, ax = plt.subplots(figsize=(7, 4.5))
-    ax.set_title(title, fontsize=10)
+    ax.set_title(title, fontsize=14)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     _light_grid(ax)
@@ -327,7 +342,13 @@ def plot_single_metric_chart(
                 annotation_clip=False,
             )
 
-    ax.legend(loc="best", framealpha=0.9, fontsize=8)
+    # Legend back inside the axes (compact width matters -- these charts get
+    # pasted two-per-row in Word, so the saved PNG must stay narrow). Tighter
+    # spacing params keep the box small even at a slightly larger font.
+    ax.legend(
+        loc="best", framealpha=0.9, fontsize=11,
+        handlelength=1.4, labelspacing=0.3, borderpad=0.4, handletextpad=0.5,
+    )
     fig.tight_layout(rect=[0, 0.04, 1, 1])
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -337,13 +358,21 @@ def plot_single_metric_chart(
     return {"status": "ok", "output_path": display_path(out_path)}
 
 
+# ── Short x-axis abbreviation for chart titles (MD/AIU/AII) ──────────────────
+# Titles use the short form ("... vs AIU") to stay compact; axis labels keep
+# the full descriptive name ("Average Interactions per User") for clarity.
+
+def _title_x_label(x_key: str, x_label: str) -> str:
+    return x_key.upper() if x_key in X_AXIS_MAP else x_label
+
+
 # ── Group 1: random ───────────────────────────────────────────────────────────
 
 def generate_random_charts(df: pd.DataFrame, out_base: Path, palette: dict) -> list[dict]:
     """
     Filter:  strategy=random
     Cutoffs: 10, 20, 50
-    X-axes:  oss (oss_pct), uss, iss
+    X-axes:  md (oss_pct), aiu (uss), aii (iss)
     Y-axes:  MAIN_METRICS (5)
     Output:  {ds}/random/cutoff_{N}/{x_key}/{y_metric}_vs_{x_key}.png
     Per dataset: 3 x 3 x 5 = 45 charts
@@ -372,7 +401,7 @@ def generate_random_charts(df: pd.DataFrame, out_base: Path, palette: dict) -> l
                         / f"cutoff_{cutoff}" / x_key
                         / f"{_metric_filename(y_metric)}_vs_{x_key}.png"
                     )
-                    title  = f"{ds_label} random cut: {y_metric}@{cutoff} vs {x_label}"
+                    title  = f"{ds_label} random cut: {y_metric}@{cutoff} vs {_title_x_label(x_key, x_label)}"
                     result = plot_single_metric_chart(
                         sub=sub_c, x_col=x_col, y_col=y_metric,
                         title=title, x_label=x_label, y_label=y_metric,
@@ -395,20 +424,32 @@ def generate_random_charts(df: pd.DataFrame, out_base: Path, palette: dict) -> l
     return index
 
 
-# ── Group 2: coldstart_u1 ─────────────────────────────────────────────────────
+# ── Group 2: coldstart_user ───────────────────────────────────────────────────
 
-def generate_coldstart_charts(df: pd.DataFrame, out_base: Path, palette: dict) -> list[dict]:
+# (user_group_key, recall_col, ndcg_col, display_label_for_titles)
+COLDSTART_USER_GROUPS = [
+    ("u1",   "Recall_u1",   "nDCG_u1",   "U1"),
+    ("u2_5", "Recall_u2_5", "nDCG_u2_5", "U2-5"),
+]
+
+
+def generate_coldstart_user_charts(df: pd.DataFrame, out_base: Path, palette: dict) -> list[dict]:
     """
     Filter:  strategy=random, cutoff=20
-    X-axes:  oss (oss_pct), uss, iss
-    Y-axes:  U1_METRICS (5)
-    Output:  {ds}/coldstart_u1/cutoff_20/{x_key}/{y_metric}_vs_{x_key}.png
-    Per dataset: 1 x 3 x 5 = 15 charts
+    Groups:  u1 (Recall_u1, nDCG_u1), u2_5 (Recall_u2_5, nDCG_u2_5)
+    X-axes:  md (oss_pct), aiu (uss), aii (iss)
+    Output:  {ds}/coldstart_user/cutoff_20/{group}/{x_key}/{y_metric}_vs_{x_key}.png
+    Per dataset: 2 groups x 3 x-axes x 2 metrics = 12 charts
+
+    Recall_u2_5/nDCG_u2_5 are plotted using the same missing-metric handling
+    as every other metric here: plot_single_metric_chart() skips (does not
+    raise) when the column is absent or entirely NaN.
     """
     COLDSTART_CUTOFF = 20
     index = []
     for ds in sorted(df["dataset"].unique()):
-        _clean_png_subtree(out_base / ds / "coldstart_u1")
+        _clean_png_subtree(out_base / ds / "coldstart_u1")    # legacy folder cleanup
+        _clean_png_subtree(out_base / ds / "coldstart_user")
         sub_c = df[
             df["dataset"].eq(ds)
             & df["strategy"].eq("random")
@@ -420,54 +461,70 @@ def generate_coldstart_charts(df: pd.DataFrame, out_base: Path, palette: dict) -
 
         assert_no_duplicates(sub_c, ["experiment", "series_label", "cutoff"])
         labels = sorted_series_labels(sub_c["series_label"].unique().tolist())
-        mixed  = check_mixed_frameworks(sub_c, f"coldstart_u1/{ds}")
+        mixed  = check_mixed_frameworks(sub_c, f"coldstart_user/{ds}")
 
-        for x_key, (x_col, x_label) in X_AXIS_MAP.items():
-            for y_metric in COLD_U1_METRICS:
-                out_path = (
-                    out_base / ds / "coldstart_u1"
-                    / f"cutoff_{COLDSTART_CUTOFF}" / x_key
-                    / f"{_metric_filename(y_metric)}_vs_{x_key}.png"
-                )
-                title  = f"{ds_label} cold-start users: {y_metric}@{COLDSTART_CUTOFF} vs {x_label}"
-                result = plot_single_metric_chart(
-                    sub=sub_c, x_col=x_col, y_col=y_metric,
-                    title=title, x_label=x_label, y_label=y_metric,
-                    palette=palette, out_path=out_path, labels=labels,
-                )
-                w = MIXED_FW_NOTE if mixed and result.get("status") == "ok" else ""
-                index.append({
-                    "dataset":     ds,
-                    "chart_group": "coldstart_u1",
-                    "strategy":    "random",
-                    "cutoff":      COLDSTART_CUTOFF,
-                    "x_metric":   x_key,
-                    "y_metric":   y_metric,
-                    "gini_type":  "",
-                    "output_path": result.get("output_path", ""),
-                    "status":     result.get("status", "skip"),
-                    "reason":     result.get("reason", ""),
-                    "warning":    w,
-                })
+        for group_key, recall_metric, ndcg_metric, group_disp in COLDSTART_USER_GROUPS:
+            for x_key, (x_col, x_label) in X_AXIS_MAP.items():
+                for y_metric in (recall_metric, ndcg_metric):
+                    out_path = (
+                        out_base / ds / "coldstart_user"
+                        / f"cutoff_{COLDSTART_CUTOFF}" / group_key / x_key
+                        / f"{_metric_filename(y_metric)}_vs_{x_key}.png"
+                    )
+                    title = (
+                        f"{ds_label} cold-start users ({group_disp}): "
+                        f"{y_metric}@{COLDSTART_CUTOFF} vs {_title_x_label(x_key, x_label)}"
+                    )
+                    result = plot_single_metric_chart(
+                        sub=sub_c, x_col=x_col, y_col=y_metric,
+                        title=title, x_label=x_label, y_label=y_metric,
+                        palette=palette, out_path=out_path, labels=labels,
+                    )
+                    w = MIXED_FW_NOTE if mixed and result.get("status") == "ok" else ""
+                    index.append({
+                        "dataset":     ds,
+                        "chart_group": "coldstart_user",
+                        "strategy":    "random",
+                        "cutoff":      COLDSTART_CUTOFF,
+                        "x_metric":   x_key,
+                        "y_metric":   y_metric,
+                        "gini_type":  group_key,
+                        "output_path": result.get("output_path", ""),
+                        "status":     result.get("status", "skip"),
+                        "reason":     result.get("reason", ""),
+                        "warning":    w,
+                    })
     return index
 
 
-# ── Group 3: coldstart_pop1 ───────────────────────────────────────────────────
+# ── Group 3: coldstart_pop ────────────────────────────────────────────────────
 
-def generate_coldstart_pop1_charts(df: pd.DataFrame, out_base: Path, palette: dict) -> list[dict]:
+# (pop_group_key, recall_col, ndcg_col, display_label_for_titles)
+COLDSTART_POP_GROUPS = [
+    ("pop1",   "Recall_pop1",   "nDCG_pop1",   "Pop1"),
+    ("pop2_5", "Recall_pop2_5", "nDCG_pop2_5", "Pop2-5"),
+]
+
+
+def generate_coldstart_pop_charts(df: pd.DataFrame, out_base: Path, palette: dict) -> list[dict]:
     """
     Filter:  strategy=random, cutoff=20
-    X-axis:  uss
-    Y-axes:  COLD_POP1_METRICS (Recall_pop1, nDCG_pop1)
-    Output:  {ds}/coldstart_pop1/cutoff_20/uss/{metric}_vs_uss.png
-    Per dataset: 2 charts
+    Groups:  pop1 (Recall_pop1, nDCG_pop1), pop2_5 (Recall_pop2_5, nDCG_pop2_5)
+    X-axes:  md (oss_pct), aiu (uss), aii (iss)
+    Output:  {ds}/coldstart_pop/cutoff_20/{group}/{x_key}/{y_metric}_vs_{x_key}.png
+    Per dataset: 2 groups x 3 x-axes x 2 metrics = 12 charts
+
+    Mirrors generate_coldstart_user_charts() exactly (same group/x-axis/metric
+    shape, just for item-popularity groups instead of user-activity groups).
+    Recall_pop2_5/nDCG_pop2_5 use the same missing-metric handling as every
+    other metric here: plot_single_metric_chart() skips (does not raise) when
+    the column is absent or entirely NaN.
     """
-    CUTOFF  = GROUP_CUTOFF
-    X_COL   = "uss"
-    X_LABEL = "USS"
+    CUTOFF = GROUP_CUTOFF
     index   = []
     for ds in sorted(df["dataset"].unique()):
-        _clean_png_subtree(out_base / ds / "coldstart_pop1")
+        _clean_png_subtree(out_base / ds / "coldstart_pop1")  # legacy folder cleanup
+        _clean_png_subtree(out_base / ds / "coldstart_pop")
         sub_c = df[
             df["dataset"].eq(ds)
             & df["strategy"].eq("random")
@@ -478,34 +535,39 @@ def generate_coldstart_pop1_charts(df: pd.DataFrame, out_base: Path, palette: di
         ds_label = _fmt_dataset(ds)
         assert_no_duplicates(sub_c, ["experiment", "series_label", "cutoff"])
         labels = sorted_series_labels(sub_c["series_label"].unique().tolist())
-        mixed  = check_mixed_frameworks(sub_c, f"coldstart_pop1/{ds}")
+        mixed  = check_mixed_frameworks(sub_c, f"coldstart_pop/{ds}")
 
-        for y_metric in COLD_POP1_METRICS:
-            out_path = (
-                out_base / ds / "coldstart_pop1"
-                / f"cutoff_{CUTOFF}" / "uss"
-                / f"{_metric_filename(y_metric)}_vs_uss.png"
-            )
-            title  = f"{ds_label} cold-start pop1: {y_metric}@{CUTOFF} vs {X_LABEL}"
-            result = plot_single_metric_chart(
-                sub=sub_c, x_col=X_COL, y_col=y_metric,
-                title=title, x_label=X_LABEL, y_label=y_metric,
-                palette=palette, out_path=out_path, labels=labels,
-            )
-            w = MIXED_FW_NOTE if mixed and result.get("status") == "ok" else ""
-            index.append({
-                "dataset":     ds,
-                "chart_group": "coldstart_pop1",
-                "strategy":    "random",
-                "cutoff":      CUTOFF,
-                "x_metric":   "uss",
-                "y_metric":   y_metric,
-                "gini_type":  "",
-                "output_path": result.get("output_path", ""),
-                "status":     result.get("status", "skip"),
-                "reason":     result.get("reason", ""),
-                "warning":    w,
-            })
+        for group_key, recall_metric, ndcg_metric, group_disp in COLDSTART_POP_GROUPS:
+            for x_key, (x_col, x_label) in X_AXIS_MAP.items():
+                for y_metric in (recall_metric, ndcg_metric):
+                    out_path = (
+                        out_base / ds / "coldstart_pop"
+                        / f"cutoff_{CUTOFF}" / group_key / x_key
+                        / f"{_metric_filename(y_metric)}_vs_{x_key}.png"
+                    )
+                    title = (
+                        f"{ds_label} cold-start items ({group_disp}): "
+                        f"{y_metric}@{CUTOFF} vs {_title_x_label(x_key, x_label)}"
+                    )
+                    result = plot_single_metric_chart(
+                        sub=sub_c, x_col=x_col, y_col=y_metric,
+                        title=title, x_label=x_label, y_label=y_metric,
+                        palette=palette, out_path=out_path, labels=labels,
+                    )
+                    w = MIXED_FW_NOTE if mixed and result.get("status") == "ok" else ""
+                    index.append({
+                        "dataset":     ds,
+                        "chart_group": "coldstart_pop",
+                        "strategy":    "random",
+                        "cutoff":      CUTOFF,
+                        "x_metric":   x_key,
+                        "y_metric":   y_metric,
+                        "gini_type":  group_key,
+                        "output_path": result.get("output_path", ""),
+                        "status":     result.get("status", "skip"),
+                        "reason":     result.get("reason", ""),
+                        "warning":    w,
+                    })
     return index
 
 
@@ -519,9 +581,22 @@ def generate_gini_charts(
     Cutoffs: 10, 20, 50
     X-axes:  item_gini, user_gini
     Y-axes:  MAIN_METRICS (5)
-    Output:  {ds}/gini/cutoff_{N}/{gini_key}/{y_metric}_vs_{gini_key}.png
-    Per dataset: 3 x 2 x 5 = 30 charts
+    Output:  {ds}/gini/cutoff_{N}/{gini_key}/overall/{y_metric}_vs_{gini_key}.png   (item_gini only; user_gini stays flat)
+             {ds}/gini/cutoff_{N}/user_gini/{y_metric}_vs_user_gini.png
+    Per dataset: 3 x 2 x 5 = 30 "overall" charts
+
+    item_gini additionally gets one subfolder per entry in EXTRA_POP_METRICS
+    below, each with nDCG for just that item-popularity group (vs item_gini),
+    to check whether an "overall nDCG rises with Gini" trend is actually
+    driven by a specific popularity group rather than uniformly across the
+    catalog.
+    Output: {ds}/gini/cutoff_{N}/item_gini/{folder}/ndcg_{folder}_vs_item_gini.png
+    Per dataset: 3 extra charts per entry (one per cutoff).
     """
+    EXTRA_POP_METRICS = [
+        (suffix, f"nDCG_{suffix}", f"nDCG ({label})")
+        for suffix, label in zip(POP_GROUP_SUFFIXES, POP_GROUP_LABELS)
+    ]
     GINI_STRATEGIES = ["head", "random", "tail"]
     index = []
     for ds in sorted(df["dataset"].unique()):
@@ -586,12 +661,14 @@ def generate_gini_charts(
             mixed  = check_mixed_frameworks(sub_c, f"gini/{ds}/cutoff{cutoff}")
 
             for gini_key, (gini_col, gini_label) in GINI_X_AXIS_MAP.items():
+                # item_gini gets an "overall" subfolder (paired with the new
+                # pop21_40 one below); user_gini keeps its original flat path
+                # since an item-popularity breakdown isn't meaningful there.
+                gini_dir = out_base / ds / "gini" / f"cutoff_{cutoff}" / gini_key
+                metric_dir = (gini_dir / "overall") if gini_key == "item_gini" else gini_dir
+
                 for y_metric in MAIN_METRICS:
-                    out_path = (
-                        out_base / ds / "gini"
-                        / f"cutoff_{cutoff}" / gini_key
-                        / f"{_metric_filename(y_metric)}_vs_{gini_key}.png"
-                    )
+                    out_path = metric_dir / f"{_metric_filename(y_metric)}_vs_{gini_key}.png"
                     title = (
                         f"{ds_label} keep_frac={gini_keep_frac}: "
                         f"{y_metric}@{cutoff} vs {gini_label}"
@@ -616,6 +693,37 @@ def generate_gini_charts(
                         "reason":     result.get("reason", ""),
                         "warning":    w,
                     })
+
+                if gini_key == "item_gini":
+                    for folder, pop_metric, pop_display in EXTRA_POP_METRICS:
+                        out_path = (
+                            gini_dir / folder
+                            / f"{_metric_filename(pop_metric)}_vs_{gini_key}.png"
+                        )
+                        title = (
+                            f"{ds_label} keep_frac={gini_keep_frac}: "
+                            f"{pop_display}@{cutoff} vs {gini_label}"
+                        )
+                        result = plot_single_metric_chart(
+                            sub=sub_c, x_col=gini_col, y_col=pop_metric,
+                            title=title, x_label=gini_label, y_label=pop_display,
+                            palette=palette, out_path=out_path, labels=labels,
+                            annotate_strategy=True,
+                        )
+                        w = MIXED_FW_NOTE if mixed and result.get("status") == "ok" else ""
+                        index.append({
+                            "dataset":     ds,
+                            "chart_group": "gini",
+                            "strategy":    "head/random/tail",
+                            "cutoff":      cutoff,
+                            "x_metric":   gini_key,
+                            "y_metric":   pop_metric,
+                            "gini_type":  folder,
+                            "output_path": result.get("output_path", ""),
+                            "status":     result.get("status", "skip"),
+                            "reason":     result.get("reason", ""),
+                            "warning":    w,
+                        })
     return index
 
 
@@ -624,7 +732,7 @@ def generate_gini_charts(
 def generate_beyond_accuracy_charts(df: pd.DataFrame, out_base: Path, palette: dict) -> list[dict]:
     """
     Filter:  strategy=random, cutoff=20
-    X-axes:  oss (oss_pct), uss, iss
+    X-axes:  md (oss_pct), aiu (uss), aii (iss)
     Y-axes:  BEYOND_ACCURACY_METRICS (4)
     Output:  {ds}/beyond_accuracy/cutoff_20/{x_key}/{metric}_vs_{x_key}.png
     Per dataset: 3 x 4 = 12 charts
@@ -647,15 +755,16 @@ def generate_beyond_accuracy_charts(df: pd.DataFrame, out_base: Path, palette: d
 
         for x_key, (x_col, x_label) in X_AXIS_MAP.items():
             for y_metric in BEYOND_ACCURACY_METRICS:
+                y_display = BEYOND_ACCURACY_DISPLAY.get(y_metric, y_metric)
                 out_path = (
                     out_base / ds / "beyond_accuracy"
                     / f"cutoff_{CUTOFF}" / x_key
-                    / f"{_metric_filename(y_metric)}_vs_{x_key}.png"
+                    / f"{_metric_filename(y_display)}_vs_{x_key}.png"
                 )
-                title  = f"{ds_label} beyond-accuracy: {y_metric}@{CUTOFF} vs {x_label}"
+                title  = f"{ds_label} beyond-accuracy: {y_display}@{CUTOFF} vs {_title_x_label(x_key, x_label)}"
                 result = plot_single_metric_chart(
                     sub=sub_c, x_col=x_col, y_col=y_metric,
-                    title=title, x_label=x_label, y_label=y_metric,
+                    title=title, x_label=x_label, y_label=y_display,
                     palette=palette, out_path=out_path, labels=labels,
                 )
                 w = MIXED_FW_NOTE if mixed and result.get("status") == "ok" else ""
@@ -747,7 +856,7 @@ def _plot_stacked_distribution(
     bar_w = 0.65
     fig_w = max(5, len(x_labels) * 1.5 + 2.5)
     fig, ax = plt.subplots(figsize=(fig_w, 5.5))
-    ax.set_title(title, fontsize=10)
+    ax.set_title(title, fontsize=12)
     ax.set_xlabel("Dataset variant")
     ax.set_ylabel(y_label)
     _light_grid(ax)
@@ -774,7 +883,7 @@ def _plot_stacked_distribution(
     ax.set_xticklabels(x_labels, fontsize=8, rotation=20, ha="right")
     ax.set_ylim(0, 108)
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{v:.0f}%"))
-    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1), fontsize=8, framealpha=0.9)
+    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1), fontsize=10, framealpha=0.9)
     fig.tight_layout()
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -783,7 +892,7 @@ def _plot_stacked_distribution(
     return {"status": "ok", "output_path": display_path(out_path)}
 
 
-# ── Cross-variant charts: nDCG group vs x (USS or ItemGini) ───────────────────
+# ── Cross-variant charts: nDCG group vs x (AIU or ItemGini) ───────────────────
 
 def _generate_cross_variant_charts(
     df: pd.DataFrame,
@@ -796,13 +905,20 @@ def _generate_cross_variant_charts(
     parent_folder: str,
     chart_group: str,
     gini_keep_frac: float,
+    x_key: str | None = None,
 ) -> list:
     """Cross-variant scatter/line charts: strategy in [head, random, tail] at a
     single keep_frac (same experiment-selection logic as generate_gini_charts),
     x=x_col, y=y_metric.
 
-    Output: {ds}/coldstart_groups/{parent_folder}/cutoff_{cutoff}/{x_col}/{y_metric_lower}_vs_{x_col}.png
+    x_key is the display/folder key (e.g. "aiu"); it defaults to x_col when not
+    given (used for gini x-axes, where the dataframe column and the display key
+    are the same, e.g. "item_gini"). The dataframe column read for plotting is
+    always x_col -- renaming only ever applies to x_key.
+
+    Output: {ds}/coldstart_groups/{parent_folder}/cutoff_{cutoff}/{x_key}/{y_metric_lower}_vs_{x_key}.png
     """
+    x_key = x_key or x_col
     CROSS_STRATEGIES = ["head", "random", "tail"]
     index = []
     for ds in sorted(df["dataset"].unique()):
@@ -820,7 +936,7 @@ def _generate_cross_variant_charts(
                     "chart_group": chart_group,
                     "strategy":    "head/random/tail",
                     "cutoff":      cutoff,
-                    "x_metric":    x_col,
+                    "x_metric":    x_key,
                     "y_metric":    y_metric,
                     "gini_type":   "",
                     "output_path": "",
@@ -841,7 +957,7 @@ def _generate_cross_variant_charts(
                     "chart_group": chart_group,
                     "strategy":    "head/random/tail",
                     "cutoff":      cutoff,
-                    "x_metric":    x_col,
+                    "x_metric":    x_key,
                     "y_metric":    y_metric,
                     "gini_type":   "",
                     "output_path": "",
@@ -854,17 +970,17 @@ def _generate_cross_variant_charts(
         ds_label = _fmt_dataset(ds)
         assert_no_duplicates(ds_sub, ["experiment", "series_label", "cutoff"])
         labels = sorted_series_labels(ds_sub["series_label"].unique().tolist())
-        mixed  = check_mixed_frameworks(ds_sub, f"coldstart_groups/{ds}/{parent_folder}/{x_col}")
+        mixed  = check_mixed_frameworks(ds_sub, f"coldstart_groups/{ds}/{parent_folder}/{x_key}")
 
         for y_metric in y_metrics:
             out_path = (
                 out_base / ds / "coldstart_groups" / parent_folder
-                / f"cutoff_{cutoff}" / x_col
-                / f"{_metric_filename(y_metric)}_vs_{x_col}.png"
+                / f"cutoff_{cutoff}" / x_key
+                / f"{_metric_filename(y_metric)}_vs_{x_key}.png"
             )
             title = (
                 f"{ds_label} keep_frac={gini_keep_frac}: "
-                f"{y_metric}@{cutoff} vs {x_label}"
+                f"{y_metric}@{cutoff} vs {_title_x_label(x_key, x_label)}"
             )
             result = plot_single_metric_chart(
                 sub=ds_sub, x_col=x_col, y_col=y_metric,
@@ -878,7 +994,7 @@ def _generate_cross_variant_charts(
                 "chart_group": chart_group,
                 "strategy":    "head/random/tail",
                 "cutoff":      cutoff,
-                "x_metric":    x_col,
+                "x_metric":    x_key,
                 "y_metric":    y_metric,
                 "gini_type":   "",
                 "output_path": result.get("output_path", ""),
@@ -910,7 +1026,7 @@ def plot_group_chart(
         return {"status": "skip", "reason": f"No group columns found: {col_names}"}
 
     fig, ax = plt.subplots(figsize=(8, 4.5))
-    ax.set_title(title, fontsize=10)
+    ax.set_title(title, fontsize=12)
     ax.set_xlabel("Group")
     ax.set_ylabel(y_label)
     _light_grid(ax)
@@ -948,7 +1064,7 @@ def plot_group_chart(
     ax.set_xticklabels(group_labels, fontsize=8)
     ax.set_ylim(bottom=0)
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:.3f}"))
-    ax.legend(loc="best", framealpha=0.9, fontsize=8)
+    ax.legend(loc="best", framealpha=0.9, fontsize=10)
     fig.tight_layout()
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1020,9 +1136,9 @@ def generate_coldstart_groups_charts(
     index.extend(_generate_cross_variant_charts(
         df, out_base, palette, cutoff=CUTOFF,
         y_metrics=["nDCG_pop1", "nDCG_pop2_5"],
-        x_col="uss", x_label="AIU (USS)",
+        x_col=X_AXIS_MAP["aiu"][0], x_key="aiu", x_label=X_AXIS_MAP["aiu"][1],
         parent_folder="popularity",
-        chart_group="coldstart_popularity_uss",
+        chart_group="coldstart_popularity_aiu",
         gini_keep_frac=gini_keep_frac,
     ))
 
@@ -1038,9 +1154,9 @@ def generate_coldstart_groups_charts(
     index.extend(_generate_cross_variant_charts(
         df, out_base, palette, cutoff=CUTOFF,
         y_metrics=["nDCG_u2_5"],
-        x_col="uss", x_label="AIU (USS)",
+        x_col=X_AXIS_MAP["aiu"][0], x_key="aiu", x_label=X_AXIS_MAP["aiu"][1],
         parent_folder="user",
-        chart_group="coldstart_user_uss",
+        chart_group="coldstart_user_aiu",
         gini_keep_frac=gini_keep_frac,
     ))
 
@@ -1348,11 +1464,11 @@ def main():
     print("\nGenerating random charts ...")
     index_random = generate_random_charts(df, out_base, palette)
 
-    print("Generating coldstart_u1 charts ...")
-    index_cold = generate_coldstart_charts(df, out_base, palette)
+    print("Generating coldstart_user charts ...")
+    index_cold = generate_coldstart_user_charts(df, out_base, palette)
 
-    print("Generating coldstart_pop1 charts ...")
-    index_pop1 = generate_coldstart_pop1_charts(df, out_base, palette)
+    print("Generating coldstart_pop charts ...")
+    index_pop1 = generate_coldstart_pop_charts(df, out_base, palette)
 
     print(f"Generating gini charts (keep_frac={args.gini_keep_frac}) ...")
     index_gini = generate_gini_charts(df, out_base, palette, gini_keep_frac=args.gini_keep_frac)

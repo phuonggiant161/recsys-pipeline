@@ -4,6 +4,6 @@
   "model": "TwoTower",
   "selected_artifact": "D:\\recsys-pipeline\\results\\librecommender\\amazon_random_keep0.2\\recs\\TwoTower.tsv",
   "artifact_type": "recommendations",
-  "selected_iteration": 21,
-  "best_valid_ndcg20": 0.006405
+  "selected_iteration": 11,
+  "best_valid_ndcg20": 0.008882
 }

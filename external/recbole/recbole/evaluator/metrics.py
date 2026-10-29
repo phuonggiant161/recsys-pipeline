@@ -680,10 +680,15 @@ class GiniIndex(AbstractMetric):
             float: the gini index.
         """
         item_count = dict(Counter(item_matrix.flatten()))
-        sorted_count = np.array(sorted(item_count.values()))
+        # Force int64: np.arange/np.array from Python ints default to int32 on
+        # Windows (unlike Linux/Mac, which default to int64). The weighted sum
+        # below can exceed +-2^31 for large catalogs with concentrated
+        # recommendation counts, silently overflowing/wrapping to a negative
+        # value under int32 and producing a wrong (negative) Gini index.
+        sorted_count = np.array(sorted(item_count.values()), dtype=np.int64)
         num_recommended_items = sorted_count.shape[0]
         total_num = item_matrix.shape[0] * item_matrix.shape[1]
-        idx = np.arange(num_items - num_recommended_items + 1, num_items + 1)
+        idx = np.arange(num_items - num_recommended_items + 1, num_items + 1, dtype=np.int64)
         gini_index = np.sum((2 * idx - num_items - 1) * sorted_count) / total_num
         gini_index /= num_items
         return gini_index

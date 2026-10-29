@@ -1,0 +1,6 @@
+True CENTER (1) ''
+False CENTER (1) 'Hình 6.8. nDCG@20 vs Item Gini – nhóm pop1'
+True CENTER (1) ''
+False CENTER (1) 'Hình 6.9. Thuật toán có Borda count cao nhất theo độ thưa dữ'
+False None ''
+False None ''
