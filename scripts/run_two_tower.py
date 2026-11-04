@@ -272,7 +272,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--embed-size", type=int, default=128, help="TwoTower tower output embedding size.")
     p.add_argument("--batch-size", type=int, default=2048)
     p.add_argument("--learning-rate", type=float, default=0.001)
-    p.add_argument("--temperature", type=float, default=0.1,
+    p.add_argument("--temperature", type=float, default=-0.1,
                     help="Softmax loss temperature (logits are divided by this before softmax). "
                          "<=0 treats it as a learnable variable, trained jointly with the model.")
     p.add_argument("--topk", type=int, default=50)

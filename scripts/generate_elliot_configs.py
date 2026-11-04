@@ -151,7 +151,7 @@ def _funksvd_models_yaml(_: str) -> str:
         monitor: nDCG@20
         mode: max
         patience: 10
-        min_delta: 0.0001
+        min_delta: 0.0
         verbose: True"""
 
 
