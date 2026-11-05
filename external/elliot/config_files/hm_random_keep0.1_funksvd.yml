@@ -51,7 +51,7 @@ experiment:
   path_output_rec_performance: ../../results/elliot/hm_random_keep0.1/performance/
   path_log_folder: ../../results/elliot/hm_random_keep0.1/logs/
 
-  gpu: -1
+  gpu: 0
 
   models:
     FunkSVD:
@@ -69,5 +69,5 @@ experiment:
         monitor: nDCG@20
         mode: max
         patience: 10
-        min_delta: 0.0001
+        min_delta: 0.0
         verbose: True

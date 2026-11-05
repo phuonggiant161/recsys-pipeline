@@ -232,7 +232,7 @@ experiment:
   path_output_rec_performance: {_RECS_FROM_CWD}/{folder_name}/performance/
   path_log_folder: {_RECS_FROM_CWD}/{folder_name}/logs/
 
-  gpu: -1
+  gpu: 0
 
   models:
 {models_block}
