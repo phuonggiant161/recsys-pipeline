@@ -138,7 +138,7 @@ def _funksvd_models_yaml(_: str) -> str:
     return """\
     FunkSVD:
       meta:
-        save_recs: True
+        save_recs: False
         validation_metric: nDCG@20
         validation_rate: 1
       epochs: 100
