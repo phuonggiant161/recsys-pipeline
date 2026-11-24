@@ -29,6 +29,11 @@ external/results/
 data/raw/*
 data/processed/*
 data/recbole/
+data/processed_*/
+data/recbole_*/
+data/processed_old_*/
+data/reports/[A-E]/
+kaggle_upload/
 results/elliot/*/recs/
 results/elliot/*/logs/
 

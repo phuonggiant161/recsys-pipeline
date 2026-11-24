@@ -26,6 +26,7 @@ No academic conclusions are written by this script -- only data outputs.
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -95,6 +96,14 @@ def load_long_all_results(xlsx_path: Path) -> pd.DataFrame:
 
     df["cutoff"]    = df["cutoff"].astype(int)
     df["keep_frac"] = df["keep_frac"].astype(float)
+
+    # Drop group values flagged low_support_* by build_performance_summary.py
+    # (too few test users in that variant); a fully blanked ballot is then
+    # handled as an empty ballot downstream.
+    for src_col in (*USER_GROUP_SRC_COL.values(), *ITEM_GROUP_SRC_COL.values()):
+        flag = "low_support_" + src_col.removeprefix("nDCG_")
+        if flag in df.columns:
+            df.loc[df[flag].astype(bool), src_col] = np.nan
     return df
 
 
@@ -1058,8 +1067,15 @@ def run_segment_layer(
 
 
 def main():
-    print(f"Loading: {INPUT_XLSX}")
-    df = load_long_all_results(INPUT_XLSX)
+    p = argparse.ArgumentParser(description="Compute Borda Count rankings")
+    p.add_argument("--input", default=str(INPUT_XLSX))
+    p.add_argument("--output-root", default=str(OUTPUT_ROOT))
+    args = p.parse_args()
+    input_xlsx  = Path(args.input)
+    output_root = Path(args.output_root)
+
+    print(f"Loading: {input_xlsx}")
+    df = load_long_all_results(input_xlsx)
     print(f"  {len(df)} rows loaded from long_all_results")
 
     global_issues: list[dict] = []
@@ -1090,7 +1106,7 @@ def main():
         issues_df = pd.DataFrame(issues) if issues else pd.DataFrame(
             columns=["analysis", "ballot", "issue_type", "detail"])
 
-        out_dir = OUTPUT_ROOT / analysis_name
+        out_dir = output_root / analysis_name
         file_titles = {
             "01_full_borda_count": "data",
             "02_borda_by_dataset": "borda_by_dataset",

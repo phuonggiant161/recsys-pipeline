@@ -1,0 +1,7 @@
+{
+  "framework": "elliot",
+  "dataset": "amazon_dedup_base_split",
+  "model": "VSM",
+  "selected_artifact": "D:\\recsys-pipeline\\results\\elliot\\amazon_dedup_base_split\\recs\\VSM_sim=cosine_up=tfidf_ip=tfidf_load=ItemAttributes.tsv",
+  "artifact_type": "recommendations"
+}

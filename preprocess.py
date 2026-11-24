@@ -26,34 +26,31 @@ from src.sasrec_history import build_sasrec_histories, ROW_SEQ_COL
 MAX_ITEM_LIST_LENGTH = 50
 
 # ── Default constants (edit here, or override via CLI args) ──────────────────
-DATASET_NAME   = "amazon"   # "hm"
-K_USER         = 15              # min interactions per user
-K_ITEM         = 15         # min interactions per item
-TEST_SIZE       = 0.1                           # pool → test
+DATASET_NAME    = "amazon"        # default when --dataset is omitted
+TEST_SIZE       = 0.1             # pool → test
 VALID_SIZE      = 0.1
-KEEP_FRACS      = [1, 0.65, 0.4, 0.2, 0.1]
-HEAD_KEEP_FRACS = [0.1]
-TAIL_KEEP_FRACS = [0.1]
-SEED           = 42
+SEED            = 2020           # thinning seed (đổi 2020..2024 cho từng lần chạy)
 DEDUP_USER_ITEM = True            # True → keep last interaction per user-item pair
+
+# Per-dataset presets, selected by --dataset. Edit here.
+PRESETS = {
+    "amazon": {
+        "k_user": 15, "k_item": 15,
+        "keep_fracs":      [1, 0.65, 0.4, 0.2, 0.1],      # AIU ≈ 24 / 15 / 8.9 / 4 / 1.8
+        "head_keep_fracs": [0.2],                         # AIU ≈ 4
+        "tail_keep_fracs": [0.19],                        # AIU ≈ 4
+    },
+    "hm": {
+        "k_user": 35, "k_item": 35,
+        "keep_fracs":      [0.52, 0.33, 0.2, 0.1, 0.05],  # AIU ≈ 24 / 15 / 8.7 / 3.9 / 1.7
+        "head_keep_fracs": [0.1],                         # AIU ≈ 3.9
+        "tail_keep_fracs": [0.1],                         # AIU ≈ 4
+    },
+}
 
 # Split strategy: False -> ratio-based holdout (TEST_SIZE/VALID_SIZE, existing
 # behavior), True -> leave-one-out (at most 1 holdout interaction per user).
 USE_LOO_SPLIT = True
-
-# # ── H&M preset ────────────────────────────────────────
-# DATASET_NAME    = "hm"
-# K_USER          = 35
-# K_ITEM          = 35
-# TEST_SIZE       = 0.1                           # pool → test
-# VALID_SIZE      = 0.1                           # train_pool → valid
-# KEEP_FRACS      = [0.5, 0.35, 0.2, 0.1, 0.05]
-#   # random thinning levels
-# HEAD_KEEP_FRACS = [0.1]
-# TAIL_KEEP_FRACS = [0.1]
-# SEED            = 42
-# DEDUP_USER_ITEM = True
-# USE_LOO_SPLIT = True
 
 # Dispatcher used by every train/valid/test split call below -- switching
 # USE_LOO_SPLIT changes splitting behavior everywhere without touching each
@@ -78,14 +75,14 @@ def _desired_holdout_sum(df: pd.DataFrame, user_col: str, holdout_size: float) -
 
 def parse_args():
     p = argparse.ArgumentParser(description="Run recsys preprocessing pipeline.")
-    p.add_argument("--dataset", default=None,
-                   help=f"Dataset name (default: {DATASET_NAME})")
+    p.add_argument("--dataset", default=None, choices=sorted(PRESETS),
+                   help=f"Dataset name; selects its PRESETS entry (default: {DATASET_NAME})")
     p.add_argument("--k", type=int, default=None,
                    help="Set both --k-user and --k-item to the same value (backward compat)")
     p.add_argument("--k-user", type=int, default=None, dest="k_user",
-                   help=f"Min interactions per user for k-core (default: {K_USER})")
+                   help="Min interactions per user for k-core (default: from preset)")
     p.add_argument("--k-item", type=int, default=None, dest="k_item",
-                   help=f"Min interactions per item for k-core (default: {K_ITEM})")
+                   help="Min interactions per item for k-core (default: from preset)")
     return p.parse_args()
 
 
@@ -372,7 +369,7 @@ def _make_thinning_metadata(
         "test_protection_policy": "recompute_protected_rows_before_test_split",
         "thinning_protection_policy": "protect_user_item_before_thinning",
         "valid_protection_policy": "recompute_protected_rows_before_valid_split",
-        "protected_row_definition": "first_interaction_per_user_plus_first_interaction_per_uncovered_item",
+        "protected_row_definition": "second_latest_interaction_per_user_plus_first_interaction_per_uncovered_item",
         "holdout_window": "contiguous_suffix_after_last_protected_interaction_per_user",
         "dedup_user_item": DEDUP_USER_ITEM,
         "dedup_keep": "last" if DEDUP_USER_ITEM else None,
@@ -395,18 +392,123 @@ def _make_thinning_metadata(
     }
 
 
+def _run_thinning_strategy(
+    strategy: str,
+    generate_fn,
+    keep_fracs: list[float],
+    seed: int,
+    output_root: Path,
+    *,
+    dataset_name, train_pool_base, test_base, test_hash, base_output,
+    preprocessing_method, user_col, item_col, timestamp_col, k_user, k_item,
+    reference_stats, train_base_metrics, desired_test_rows_sum,
+    split_report_rows, extra_metadata,
+) -> list[dict]:
+    """Thin train_pool_base with one strategy, split train/valid, save each level.
+
+    Returns the report rows (keep_frac + sparsity metrics) for this strategy.
+    """
+    pool_outputs = generate_fn(
+        df=train_pool_base,
+        keep_fracs=keep_fracs,
+        user_col=user_col,
+        item_col=item_col,
+        timestamp_col=timestamp_col,
+        seed=seed,
+    )
+
+    report_rows = [{"keep_frac": 1.0, **train_base_metrics}]
+
+    for level_name, thin_train_pool in pool_outputs.items():
+        _log_df(f"  {strategy} {level_name} thin_train_pool", thin_train_pool, user_col, item_col)
+        desired_valid_rows_sum = _desired_holdout_sum(thin_train_pool, user_col, VALID_SIZE)
+        thin_train, thin_valid = userwise_temporal_holdout(
+            df=thin_train_pool,
+            user_col=user_col,
+            item_col=item_col,
+            timestamp_col=timestamp_col,
+            holdout_size=VALID_SIZE,
+            split_name=f"valid_{dataset_name}_{strategy}_{level_name}",
+        )
+        _log_df(f"  {strategy} {level_name} train", thin_train, user_col, item_col)
+        _log_df(f"  {strategy} {level_name} valid", thin_valid, user_col, item_col)
+        _assert_split(f"{strategy}_{level_name}_valid", thin_train_pool, thin_train, thin_valid, user_col, item_col)
+        _verify_split(
+            f"{dataset_name}_{strategy}_{level_name}",
+            thin_train_pool, thin_train, thin_valid, test_base,
+            test_hash, user_col, item_col, timestamp_col, VALID_SIZE, split_report_rows,
+        )
+        thin_metrics = compute_sparsity_metrics(
+            thin_train, user_col=user_col, item_col=item_col, reference_stats=reference_stats
+        )
+        thin_output = output_root / f"{dataset_name}_{strategy}_{level_name}"
+        keep_frac = len(thin_train_pool) / len(train_pool_base)
+        thin_metadata = _make_thinning_metadata(
+            dataset_name=dataset_name, method=_STRATEGY_METHOD[strategy],
+            base_output=base_output, preprocessing_method=preprocessing_method,
+            user_col=user_col, item_col=item_col, timestamp_col=timestamp_col,
+            k_user=k_user, k_item=k_item, keep_frac=keep_frac,
+            reference_stats=reference_stats, train_metrics=thin_metrics, test_base=test_base,
+            desired_test_rows_sum=desired_test_rows_sum,
+            desired_valid_rows_sum=desired_valid_rows_sum,
+            thin_train=thin_train, thin_valid=thin_valid,
+        )
+        thin_metadata.update(extra_metadata)
+        thin_train_hist, thin_valid_hist, test_hist = build_sasrec_histories(
+            train_df=thin_train, valid_df=thin_valid, test_df=test_base,
+            user_col=user_col, item_col=item_col, timestamp_col=timestamp_col,
+            row_seq_col=ROW_SEQ_COL, max_item_list_length=MAX_ITEM_LIST_LENGTH,
+        )
+        _verify_membership_unchanged(
+            thin_output.name, thin_output,
+            thin_train_hist, thin_valid_hist, test_hist,
+            user_col, item_col, timestamp_col,
+        )
+        save_train_valid_test_folder(
+            train_df=thin_train_hist, valid_df=thin_valid_hist, test_df=test_hist,
+            output_dir=thin_output, user_col=user_col, item_col=item_col,
+            metadata=thin_metadata,
+        )
+        report_rows.append({"keep_frac": keep_frac, **thin_metrics})
+
+    return report_rows
+
+
+_STRATEGY_METHOD = {
+    "random": "random_thinning_train_only",
+    "head":   "head_item_cut_train_only",
+    "tail":   "tail_item_cut_train_only",
+}
+
+_SPLIT_REPORT_COLUMNS = [
+    "config", "thinned_pool", "train", "valid",
+    "actual_valid_ratio", "desired_valid_sum", "valid_shortfall", "quota_ok",
+    "test", "test_hash_ok", "user_cov", "item_cov",
+    "train_dups", "valid_dups", "test_dups",
+    "tv_overlap", "tt_overlap", "vt_overlap",
+]
+
+
 def main():
     args = parse_args()
 
     dataset_name = args.dataset or DATASET_NAME
+    preset = PRESETS[dataset_name]
 
     # Resolve k values: --k sets both; --k-user/--k-item override individually
     if args.k is not None:
         k_user = args.k
         k_item = args.k
     else:
-        k_user = args.k_user if args.k_user is not None else K_USER
-        k_item = args.k_item if args.k_item is not None else K_ITEM
+        k_user = args.k_user if args.k_user is not None else preset["k_user"]
+        k_item = args.k_item if args.k_item is not None else preset["k_item"]
+
+    output_root = Path("data/processed")
+    report_dir  = Path("data/reports")
+    seed        = SEED
+
+    print(f"Dataset={dataset_name} k_user={k_user} k_item={k_item} seed={seed}")
+    print(f"  keep_fracs={preset['keep_fracs']} head={preset['head_keep_fracs']} tail={preset['tail_keep_fracs']}")
 
     # load dataset
     cfg = get_dataset_config(dataset_name)
@@ -414,9 +516,6 @@ def main():
     user_col      = cfg["user_col"]
     item_col      = cfg["item_col"]
     timestamp_col = cfg["timestamp_col"]
-
-    output_root = Path("data/processed")
-    output_root.mkdir(parents=True, exist_ok=True)
 
     print("Step 1: Load raw data")
     df = load_dataframe(input_path)
@@ -460,7 +559,6 @@ def main():
         dense_df, user_col=user_col, item_col=item_col, reference_stats=dense_reference_stats
     )
 
-    dense_output = output_root / f"{dataset_name}_{version_name}"
     dense_metadata = {
         "dataset_name": dataset_name,
         "method": f"{preprocessing_method}_kcore",
@@ -475,19 +573,12 @@ def main():
         "metrics": dense_metrics,
     }
 
-    save_dataset_folder(
-        df=dense_df,
-        output_dir=dense_output,
-        user_col=user_col,
-        item_col=item_col,
-        metadata=dense_metadata,
-    )
-
     # Stable row identifier assigned once, before any split/thinning. Carried
     # through every downstream train/valid/test/thinned frame (all split and
     # thinning helpers preserve extra columns) and used only as a deterministic
     # tie-break when building SASRec histories (see src/sasrec_history.py) --
     # never used for split/thinning decisions themselves.
+    dense_df_saved = dense_df
     dense_df = dense_df.reset_index(drop=True)
     dense_df[ROW_SEQ_COL] = np.arange(len(dense_df), dtype=np.int64)
 
@@ -514,11 +605,12 @@ def main():
     )
     _assert_split("step4_test", dense_df, train_pool_base, test_base, user_col, item_col)
 
-    # Compute test hash once — all configurations must produce the same test set
+    # Compute test hash once — all configurations must
+    # produce the same test set
     _test_hash_cols = [user_col, item_col, timestamp_col]
     test_hash = _dataframe_hash(test_base, _test_hash_cols)
     print(f"  test_base hash: {test_hash}")
-    split_report_rows: list[dict] = []
+    base_split_report_rows: list[dict] = []
 
     # ── Step 4b: train_pool_base → train_base / valid_base ──────────────────
     desired_valid_base_sum = _desired_holdout_sum(train_pool_base, user_col, VALID_SIZE)
@@ -540,7 +632,7 @@ def main():
     _verify_split(
         f"{dataset_name}_base", train_pool_base,
         train_base, valid_base, test_base,
-        test_hash, user_col, item_col, timestamp_col, VALID_SIZE, split_report_rows,
+        test_hash, user_col, item_col, timestamp_col, VALID_SIZE, base_split_report_rows,
     )
 
     # Reference population for all summary reports = final base train set
@@ -566,6 +658,25 @@ def main():
         f"coldstart_item={_format_sig_pct(train_base_metrics['coldstart_item'])}%"
     )
 
+    train_base_hist, valid_base_hist, test_base_hist = build_sasrec_histories(
+        train_df=train_base, valid_df=valid_base, test_df=test_base,
+        user_col=user_col, item_col=item_col, timestamp_col=timestamp_col,
+        row_seq_col=ROW_SEQ_COL, max_item_list_length=MAX_ITEM_LIST_LENGTH,
+    )
+
+    # ── Save k-core + base split, then thin ─────────────────────────────────
+    output_root.mkdir(parents=True, exist_ok=True)
+    extra_metadata = {"thinning_seed": seed}
+
+    dense_output = output_root / f"{dataset_name}_{version_name}"
+    save_dataset_folder(
+        df=dense_df_saved,
+        output_dir=dense_output,
+        user_col=user_col,
+        item_col=item_col,
+        metadata=dense_metadata,
+    )
+
     base_output = output_root / f"{dataset_name}_{version_name}_base_split"
     base_metadata = {
         "dataset_name": dataset_name,
@@ -587,7 +698,7 @@ def main():
         "test_protection_policy": "recompute_protected_rows_before_test_split",
         "thinning_protection_policy": "protect_user_item_before_thinning",
         "valid_protection_policy": "recompute_protected_rows_before_valid_split",
-        "protected_row_definition": "first_interaction_per_user_plus_first_interaction_per_uncovered_item",
+        "protected_row_definition": "second_latest_interaction_per_user_plus_first_interaction_per_uncovered_item",
         "holdout_window": "contiguous_suffix_after_last_protected_interaction_per_user",
         "dedup_user_item": DEDUP_USER_ITEM,
         "dedup_keep": "last" if DEDUP_USER_ITEM else None,
@@ -606,13 +717,8 @@ def main():
         "test_users":  int(test_base[user_col].nunique()),
         "test_items":  int(test_base[item_col].nunique()),
         "test_rows":   int(len(test_base)),
+        **extra_metadata,
     }
-
-    train_base_hist, valid_base_hist, test_base_hist = build_sasrec_histories(
-        train_df=train_base, valid_df=valid_base, test_df=test_base,
-        user_col=user_col, item_col=item_col, timestamp_col=timestamp_col,
-        row_seq_col=ROW_SEQ_COL, max_item_list_length=MAX_ITEM_LIST_LENGTH,
-    )
     _verify_membership_unchanged(
         base_output.name, base_output,
         train_base_hist, valid_base_hist, test_base_hist,
@@ -628,218 +734,35 @@ def main():
         metadata=base_metadata,
     )
 
-    # ── Step 5: Random thinning on train_pool_base → thin_train_pool → train/valid ──
+    split_report_rows = list(base_split_report_rows)
+    common = dict(
+        dataset_name=dataset_name, train_pool_base=train_pool_base,
+        test_base=test_base, test_hash=test_hash, base_output=base_output,
+        preprocessing_method=preprocessing_method,
+        user_col=user_col, item_col=item_col, timestamp_col=timestamp_col,
+        k_user=k_user, k_item=k_item,
+        reference_stats=reference_stats, train_base_metrics=train_base_metrics,
+        desired_test_rows_sum=desired_test_rows_sum,
+        split_report_rows=split_report_rows, extra_metadata=extra_metadata,
+    )
+
+    # ── Steps 5–7: random / head / tail thinning on train_pool_base ─────
     print("Step 5: Random thinning")
-    random_pool_outputs = generate_random_thinning_levels(
-        df=train_pool_base,
-        keep_fracs=KEEP_FRACS,
-        user_col=user_col,
-        item_col=item_col,
-        timestamp_col=timestamp_col,
-        seed=SEED,
-    )
-
-    random_report_rows = [{"keep_frac": 1.0, **train_base_metrics}]
-
-    for level_name, thin_train_pool in random_pool_outputs.items():
-        _log_df(f"  random {level_name} thin_train_pool", thin_train_pool, user_col, item_col)
-        desired_valid_rows_sum = _desired_holdout_sum(thin_train_pool, user_col, VALID_SIZE)
-        thin_train, thin_valid = userwise_temporal_holdout(
-            df=thin_train_pool,
-            user_col=user_col,
-            item_col=item_col,
-            timestamp_col=timestamp_col,
-            holdout_size=VALID_SIZE,
-            split_name=f"valid_{dataset_name}_random_{level_name}",
-        )
-        _log_df(f"  random {level_name} train", thin_train, user_col, item_col)
-        _log_df(f"  random {level_name} valid", thin_valid, user_col, item_col)
-        _assert_split(f"random_{level_name}_valid", thin_train_pool, thin_train, thin_valid, user_col, item_col)
-        _verify_split(
-            f"{dataset_name}_random_{level_name}",
-            thin_train_pool, thin_train, thin_valid, test_base,
-            test_hash, user_col, item_col, timestamp_col, VALID_SIZE, split_report_rows,
-        )
-        thin_metrics = compute_sparsity_metrics(
-            thin_train, user_col=user_col, item_col=item_col, reference_stats=reference_stats
-        )
-        thin_output = output_root / f"{dataset_name}_random_{level_name}"
-        keep_frac = len(thin_train_pool) / len(train_pool_base)
-        thin_metadata = _make_thinning_metadata(
-            dataset_name=dataset_name, method="random_thinning_train_only",
-            base_output=base_output, preprocessing_method=preprocessing_method,
-            user_col=user_col, item_col=item_col, timestamp_col=timestamp_col,
-            k_user=k_user, k_item=k_item, keep_frac=keep_frac,
-            reference_stats=reference_stats, train_metrics=thin_metrics, test_base=test_base,
-            desired_test_rows_sum=desired_test_rows_sum,
-            desired_valid_rows_sum=desired_valid_rows_sum,
-            thin_train=thin_train, thin_valid=thin_valid,
-        )
-        thin_train_hist, thin_valid_hist, test_hist = build_sasrec_histories(
-            train_df=thin_train, valid_df=thin_valid, test_df=test_base,
-            user_col=user_col, item_col=item_col, timestamp_col=timestamp_col,
-            row_seq_col=ROW_SEQ_COL, max_item_list_length=MAX_ITEM_LIST_LENGTH,
-        )
-        _verify_membership_unchanged(
-            thin_output.name, thin_output,
-            thin_train_hist, thin_valid_hist, test_hist,
-            user_col, item_col, timestamp_col,
-        )
-        save_train_valid_test_folder(
-            train_df=thin_train_hist, valid_df=thin_valid_hist, test_df=test_hist,
-            output_dir=thin_output, user_col=user_col, item_col=item_col,
-            metadata=thin_metadata,
-        )
-        random_report_rows.append({"keep_frac": keep_frac, **thin_metrics})
-
-    # ── Step 6: Head-item thinning on train_pool_base ───────────────────────
+    random_report_rows = _run_thinning_strategy(
+        "random", generate_random_thinning_levels, preset["keep_fracs"], seed, output_root, **common)
     print("Step 6: Head-item thinning")
-    head_pool_outputs = generate_head_item_cut_levels(
-        df=train_pool_base,
-        keep_fracs=HEAD_KEEP_FRACS,
-        user_col=user_col,
-        item_col=item_col,
-        timestamp_col=timestamp_col,
-        seed=SEED,
-    )
-
-    head_report_rows = [{"keep_frac": 1.0, **train_base_metrics}]
-
-    for level_name, thin_train_pool in head_pool_outputs.items():
-        _log_df(f"  head {level_name} thin_train_pool", thin_train_pool, user_col, item_col)
-        desired_valid_rows_sum = _desired_holdout_sum(thin_train_pool, user_col, VALID_SIZE)
-        thin_train, thin_valid = userwise_temporal_holdout(
-            df=thin_train_pool,
-            user_col=user_col,
-            item_col=item_col,
-            timestamp_col=timestamp_col,
-            holdout_size=VALID_SIZE,
-            split_name=f"valid_{dataset_name}_head_{level_name}",
-        )
-        _log_df(f"  head {level_name} train", thin_train, user_col, item_col)
-        _log_df(f"  head {level_name} valid", thin_valid, user_col, item_col)
-        _assert_split(f"head_{level_name}_valid", thin_train_pool, thin_train, thin_valid, user_col, item_col)
-        _verify_split(
-            f"{dataset_name}_head_{level_name}",
-            thin_train_pool, thin_train, thin_valid, test_base,
-            test_hash, user_col, item_col, timestamp_col, VALID_SIZE, split_report_rows,
-        )
-        thin_metrics = compute_sparsity_metrics(
-            thin_train, user_col=user_col, item_col=item_col, reference_stats=reference_stats
-        )
-        thin_output = output_root / f"{dataset_name}_head_{level_name}"
-        keep_frac = len(thin_train_pool) / len(train_pool_base)
-        thin_metadata = _make_thinning_metadata(
-            dataset_name=dataset_name, method="head_item_cut_train_only",
-            base_output=base_output, preprocessing_method=preprocessing_method,
-            user_col=user_col, item_col=item_col, timestamp_col=timestamp_col,
-            k_user=k_user, k_item=k_item, keep_frac=keep_frac,
-            reference_stats=reference_stats, train_metrics=thin_metrics, test_base=test_base,
-            desired_test_rows_sum=desired_test_rows_sum,
-            desired_valid_rows_sum=desired_valid_rows_sum,
-            thin_train=thin_train, thin_valid=thin_valid,
-        )
-        thin_train_hist, thin_valid_hist, test_hist = build_sasrec_histories(
-            train_df=thin_train, valid_df=thin_valid, test_df=test_base,
-            user_col=user_col, item_col=item_col, timestamp_col=timestamp_col,
-            row_seq_col=ROW_SEQ_COL, max_item_list_length=MAX_ITEM_LIST_LENGTH,
-        )
-        _verify_membership_unchanged(
-            thin_output.name, thin_output,
-            thin_train_hist, thin_valid_hist, test_hist,
-            user_col, item_col, timestamp_col,
-        )
-        save_train_valid_test_folder(
-            train_df=thin_train_hist, valid_df=thin_valid_hist, test_df=test_hist,
-            output_dir=thin_output, user_col=user_col, item_col=item_col,
-            metadata=thin_metadata,
-        )
-        head_report_rows.append({"keep_frac": keep_frac, **thin_metrics})
-
-    # ── Step 7: Tail-item thinning on train_pool_base ───────────────────────
+    head_report_rows = _run_thinning_strategy(
+        "head", generate_head_item_cut_levels, preset["head_keep_fracs"], seed, output_root, **common)
     print("Step 7: Tail-item thinning")
-    tail_pool_outputs = generate_tail_item_cut_levels(
-        df=train_pool_base,
-        keep_fracs=TAIL_KEEP_FRACS,
-        user_col=user_col,
-        item_col=item_col,
-        timestamp_col=timestamp_col,
-        seed=SEED,
-    )
+    tail_report_rows = _run_thinning_strategy(
+        "tail", generate_tail_item_cut_levels, preset["tail_keep_fracs"], seed, output_root, **common)
 
-    tail_report_rows = [{"keep_frac": 1.0, **train_base_metrics}]
+    report_dir.mkdir(parents=True, exist_ok=True)
+    for strategy, rows in [("random", random_report_rows), ("head", head_report_rows), ("tail", tail_report_rows)]:
+        _format_report_df(rows).to_csv(report_dir / f"{dataset_name}_{strategy}_summary.csv", index=False)
 
-    for level_name, thin_train_pool in tail_pool_outputs.items():
-        _log_df(f"  tail {level_name} thin_train_pool", thin_train_pool, user_col, item_col)
-        desired_valid_rows_sum = _desired_holdout_sum(thin_train_pool, user_col, VALID_SIZE)
-        thin_train, thin_valid = userwise_temporal_holdout(
-            df=thin_train_pool,
-            user_col=user_col,
-            item_col=item_col,
-            timestamp_col=timestamp_col,
-            holdout_size=VALID_SIZE,
-            split_name=f"valid_{dataset_name}_tail_{level_name}",
-        )
-        _log_df(f"  tail {level_name} train", thin_train, user_col, item_col)
-        _log_df(f"  tail {level_name} valid", thin_valid, user_col, item_col)
-        _assert_split(f"tail_{level_name}_valid", thin_train_pool, thin_train, thin_valid, user_col, item_col)
-        _verify_split(
-            f"{dataset_name}_tail_{level_name}",
-            thin_train_pool, thin_train, thin_valid, test_base,
-            test_hash, user_col, item_col, timestamp_col, VALID_SIZE, split_report_rows,
-        )
-        thin_metrics = compute_sparsity_metrics(
-            thin_train, user_col=user_col, item_col=item_col, reference_stats=reference_stats
-        )
-        thin_output = output_root / f"{dataset_name}_tail_{level_name}"
-        keep_frac = len(thin_train_pool) / len(train_pool_base)
-        thin_metadata = _make_thinning_metadata(
-            dataset_name=dataset_name, method="tail_item_cut_train_only",
-            base_output=base_output, preprocessing_method=preprocessing_method,
-            user_col=user_col, item_col=item_col, timestamp_col=timestamp_col,
-            k_user=k_user, k_item=k_item, keep_frac=keep_frac,
-            reference_stats=reference_stats, train_metrics=thin_metrics, test_base=test_base,
-            desired_test_rows_sum=desired_test_rows_sum,
-            desired_valid_rows_sum=desired_valid_rows_sum,
-            thin_train=thin_train, thin_valid=thin_valid,
-        )
-        thin_train_hist, thin_valid_hist, test_hist = build_sasrec_histories(
-            train_df=thin_train, valid_df=thin_valid, test_df=test_base,
-            user_col=user_col, item_col=item_col, timestamp_col=timestamp_col,
-            row_seq_col=ROW_SEQ_COL, max_item_list_length=MAX_ITEM_LIST_LENGTH,
-        )
-        _verify_membership_unchanged(
-            thin_output.name, thin_output,
-            thin_train_hist, thin_valid_hist, test_hist,
-            user_col, item_col, timestamp_col,
-        )
-        save_train_valid_test_folder(
-            train_df=thin_train_hist, valid_df=thin_valid_hist, test_df=test_hist,
-            output_dir=thin_output, user_col=user_col, item_col=item_col,
-            metadata=thin_metadata,
-        )
-        tail_report_rows.append({"keep_frac": keep_frac, **thin_metrics})
-
-    Path("data/reports").mkdir(parents=True, exist_ok=True)
-
-    _format_report_df(random_report_rows).to_csv(
-        f"data/reports/{dataset_name}_random_summary.csv", index=False
-    )
-    _format_report_df(head_report_rows).to_csv(
-        f"data/reports/{dataset_name}_head_summary.csv", index=False
-    )
-    _format_report_df(tail_report_rows).to_csv(
-        f"data/reports/{dataset_name}_tail_summary.csv", index=False
-    )
-
-    print("\n-- Split verification report -------------------------------------------")
-    report_df = pd.DataFrame(split_report_rows, columns=[
-        "config", "thinned_pool", "train", "valid",
-        "actual_valid_ratio", "desired_valid_sum", "valid_shortfall", "quota_ok",
-        "test", "test_hash_ok", "user_cov", "item_cov",
-        "train_dups", "valid_dups", "test_dups",
-        "tv_overlap", "tt_overlap", "vt_overlap",
-    ])
+    print(f"\n-- Split verification report -------------------------")
+    report_df = pd.DataFrame(split_report_rows, columns=_SPLIT_REPORT_COLUMNS)
     print(report_df.to_string(index=False))
     print("------------------------------------------------------------------------")
 

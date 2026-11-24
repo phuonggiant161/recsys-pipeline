@@ -79,8 +79,9 @@ class GiniIndex(BaseMetric):
 
         gini = sum([(2 * (j + (self._num_items - n_recommended_items) + 1) - self._num_items - 1) * (cs / self._free_norm) for j, cs in enumerate(sorted(self._item_count.values()))])
         gini /= (self._num_items - 1)
-        # Return standard Gini (0 = perfectly equal, 1 = maximally concentrated).
-        # Consistent with RecBole GiniIndex semantics.
+        # Original Elliot definition: diversity = 1 - Gini (1 = perfectly equal,
+        # 0 = maximally concentrated). RecBole GiniIndex is patched to match.
+        gini = 1 - gini
         return gini
 
 

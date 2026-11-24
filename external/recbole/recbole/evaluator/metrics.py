@@ -646,7 +646,7 @@ class GiniIndex(AbstractMetric):
     """
 
     metric_type = EvaluatorType.RANKING
-    smaller = True
+    smaller = False
     metric_need = ["rec.items", "data.num_items"]
 
     def __init__(self, config):
@@ -691,7 +691,8 @@ class GiniIndex(AbstractMetric):
         idx = np.arange(num_items - num_recommended_items + 1, num_items + 1, dtype=np.int64)
         gini_index = np.sum((2 * idx - num_items - 1) * sorted_count) / total_num
         gini_index /= num_items
-        return gini_index
+        # Report diversity = 1 - Gini, matching the original Elliot GiniIndex.
+        return 1 - gini_index
 
 
 class TailPercentage(AbstractMetric):

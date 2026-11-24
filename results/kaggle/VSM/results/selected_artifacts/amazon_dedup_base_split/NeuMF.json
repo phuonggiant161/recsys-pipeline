@@ -1,0 +1,7 @@
+{
+  "framework": "recbole",
+  "dataset": "amazon_dedup_base_split",
+  "model": "NeuMF",
+  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\amazon_dedup_base_split\\NeuMF\\NeuMF-Oct-03-2026_12-15-14.pth",
+  "artifact_type": "checkpoint"
+}

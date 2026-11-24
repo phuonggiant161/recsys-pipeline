@@ -73,7 +73,8 @@ class FunkSVD(RecMixin, BaseRecommenderModel):
                                    self._factors,
                                    self._lambda_weights,
                                    self._lambda_bias,
-                                   self._learning_rate)
+                                   self._learning_rate,
+                                   random_seed=self._seed)
 
     @property
     def name(self):

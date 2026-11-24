@@ -40,8 +40,26 @@ POP_GROUP_SUFFIXES  = ["pop1", "pop2_5", "pop6_10", "pop11_20", "pop21_40", "pop
 USER_GROUP_SUFFIXES = ["u1", "u2_5", "u6_10", "u11_20", "u21_40", "u41plus"]
 POP_METRICS  = [f"Recall_{s}" for s in POP_GROUP_SUFFIXES] + [f"nDCG_{s}" for s in POP_GROUP_SUFFIXES]
 USER_METRICS = [f"Recall_{s}" for s in USER_GROUP_SUFFIXES] + [f"nDCG_{s}" for s in USER_GROUP_SUFFIXES]
+# Coarser popularity groups derived from the fine groups above (not read from
+# result files). Valid because the split is leave-one-out: each test user has
+# exactly one GT item, so each user falls in exactly one fine group and the
+# merged value is the user-count-weighted mean of its fine groups.
+MERGED_POP_GROUPS: dict[str, list[str]] = {
+    "pop1_20":   ["pop1", "pop2_5", "pop6_10", "pop11_20"],
+    "pop21plus": ["pop21_40", "pop41plus"],
+}
+MERGED_POP_METRICS = [f"{m}_{s}" for s in MERGED_POP_GROUPS for m in ("Recall", "nDCG")]
+
+# Low-support rule for group metrics (random strategy only): within a dataset,
+# a variant's group value is flagged when that variant holds less than this
+# share of the group's test users summed over all random variants. Flagged
+# values stay in the workbook; charts and Borda drop them via low_support_*.
+USER_GROUP_MIN_SHARE = 0.005
+POP_GROUP_MIN_SHARE  = 0.01
+# Also flagged when the variant has this many test users or fewer, regardless of share.
+GROUP_MAX_FLAGGED_USERS = 10
 # Full metric set carried through build_long / check_and_dedup / build_wide
-RESULT_METRICS = MAIN_METRICS + BEYOND_ACCURACY_METRICS + POP_METRICS + USER_METRICS
+RESULT_METRICS = MAIN_METRICS + BEYOND_ACCURACY_METRICS + POP_METRICS + USER_METRICS + MERGED_POP_METRICS
 
 # Mapping: canonical name → Elliot TSV column name (Elliot uses its own metric class names)
 _ELLIOT_BEYOND_COL: dict[str, str] = {
@@ -298,6 +316,12 @@ def apply_group_eligibility(
 
 # ── Collectors ────────────────────────────────────────────────────────────────
 
+def _perf_dir_of(exp_dir: Path) -> Path:
+    """{exp}/performance/ when present, else {exp}/ itself (Kaggle layout keeps files flat)."""
+    perf_dir = exp_dir / "performance"
+    return perf_dir if perf_dir.is_dir() else exp_dir
+
+
 def collect_elliot(elliot_root: Path, processed_root: Path, audit: list) -> list[dict]:
     """Collect rows from results/elliot/{exp}/performance/{Model}_cutoff_{N}.tsv."""
     if not elliot_root.exists():
@@ -308,8 +332,8 @@ def collect_elliot(elliot_root: Path, processed_root: Path, audit: list) -> list
     for exp_dir in sorted(elliot_root.iterdir()):
         if not exp_dir.is_dir() or exp_dir.name.startswith("_"):
             continue
-        perf_dir = exp_dir / "performance"
-        if not perf_dir.exists():
+        perf_dir = _perf_dir_of(exp_dir)
+        if not any(perf_dir.glob("*_cutoff_*.tsv")):
             continue
 
         try:
@@ -493,8 +517,8 @@ def collect_recbole(recbole_root: Path, processed_root: Path, audit: list) -> li
     for exp_dir in sorted(recbole_root.iterdir()):
         if not exp_dir.is_dir() or exp_dir.name.startswith("_"):
             continue
-        perf_dir = exp_dir / "performance"
-        if not perf_dir.exists():
+        perf_dir = _perf_dir_of(exp_dir)
+        if not any(perf_dir.glob("*_evaluation.tsv")) and not any(perf_dir.glob("*_recbole.tsv")):
             continue
 
         try:
@@ -575,6 +599,30 @@ def collect_recbole(recbole_root: Path, processed_root: Path, audit: list) -> li
                 apply_group_eligibility(record, exp_dir.name, processed_root)
                 rows.append(record)
 
+    return rows
+
+
+def collect_kaggle(kaggle_root: Path, processed_root: Path, audit: list) -> list[dict]:
+    """Collect rows from results/kaggle/{Model}/{exp}/[performance/]{result files}.
+
+    Each model folder is scanned with both collectors (Elliot *_cutoff_*.tsv and
+    RecBole *_evaluation.tsv). Only rows whose model matches the folder name are
+    kept, so stray files of other models inside a folder are ignored."""
+    if not kaggle_root.exists():
+        print(f"[WARN] Kaggle results root not found: {kaggle_root}")
+        return []
+
+    rows = []
+    for model_dir in sorted(kaggle_root.iterdir()):
+        if not model_dir.is_dir() or model_dir.name.startswith("_"):
+            continue
+        model_rows = (collect_elliot(model_dir, processed_root, audit)
+                      + collect_recbole(model_dir, processed_root, audit))
+        kept = [r for r in model_rows if str(r["model"]).lower() == model_dir.name.lower()]
+        if len(kept) < len(model_rows):
+            audit.append({"level": "WARN", "source": str(model_dir),
+                          "message": f"Ignored {len(model_rows) - len(kept)} rows of other models"})
+        rows.extend(kept)
     return rows
 
 
@@ -779,6 +827,52 @@ def build_long(rows: list[dict]) -> pd.DataFrame:
     return df
 
 
+def add_merged_pop_metrics(df: pd.DataFrame, processed_root: Path) -> pd.DataFrame:
+    """Fill MERGED_POP_METRICS as the eligible-user-weighted mean of the fine pop groups.
+
+    NaN when processed data is unavailable, when the merged group has no eligible
+    users, or when any eligible fine group is missing its value."""
+    df = df.copy()
+    for idx, row in df.iterrows():
+        eligibility = compute_group_eligibility(row["experiment"], processed_root)
+        if not eligibility:
+            continue
+        for merged, fine_groups in MERGED_POP_GROUPS.items():
+            weights = {g: eligibility.get(f"pop_{g}", 0) for g in fine_groups}
+            total = sum(weights.values())
+            for metric in ("Recall", "nDCG"):
+                values = {g: row[f"{metric}_{g}"] for g in fine_groups if weights[g] > 0}
+                if total == 0 or any(pd.isna(v) for v in values.values()):
+                    continue
+                df.at[idx, f"{metric}_{merged}"] = sum(weights[g] * v for g, v in values.items()) / total
+    return df
+
+
+def add_group_support(df: pd.DataFrame, processed_root: Path) -> pd.DataFrame:
+    """Add n_test_{group} (eligible test users) and low_support_{group} flags.
+
+    A random-strategy value is flagged when its share of the group's test users
+    (summed per dataset over the random variants) is below the group's min share,
+    or when it has GROUP_MAX_FLAGGED_USERS test users or fewer. Other strategies
+    are never flagged."""
+    df = df.copy()
+    groups = ([(s, "user", USER_GROUP_MIN_SHARE) for s in USER_GROUP_SUFFIXES]
+              + [(s, "pop", POP_GROUP_MIN_SHARE) for s in POP_GROUP_SUFFIXES])
+    elig = {exp: compute_group_eligibility(exp, processed_root) for exp in df["experiment"].unique()}
+    for suffix, kind, _ in groups:
+        df[f"n_test_{suffix}"] = df["experiment"].map(
+            lambda e: elig[e].get(f"{kind}_{suffix}", np.nan) if elig[e] else np.nan)
+
+    random_exps = df[df["strategy"] == "random"].drop_duplicates("experiment")
+    for suffix, _, min_share in groups:
+        totals = random_exps.groupby("dataset")[f"n_test_{suffix}"].sum()
+        n_test = df[f"n_test_{suffix}"]
+        share = n_test / df["dataset"].map(totals)
+        df[f"low_support_{suffix}"] = (df["strategy"] == "random") & (
+            (share < min_share) | (n_test <= GROUP_MAX_FLAGGED_USERS))
+    return df
+
+
 def build_wide(long_df: pd.DataFrame, metric_cols: list[str], sheet_name: str) -> pd.DataFrame:
     """Pivot metric_cols over cutoff. Joins k_user/k_item/sparsity after pivot."""
     pivot_index    = ["experiment", "dataset", "strategy", "keep_frac",
@@ -968,6 +1062,10 @@ def parse_args():
     p = argparse.ArgumentParser(description="Build unified performance summary Excel")
     p.add_argument("--elliot-results-root",  default=str(DEFAULT_ELLIOT_ROOT))
     p.add_argument("--recbole-results-root", default=str(DEFAULT_RECBOLE_ROOT))
+    p.add_argument(
+        "--kaggle-root", default=None,
+        help="Read results/kaggle/{Model}/{exp}/ instead of the Elliot/RecBole roots.",
+    )
     p.add_argument("--processed-root",       default=str(DEFAULT_PROCESSED))
     p.add_argument("--reports-root",         default=str(DEFAULT_REPORTS))
     p.add_argument("--output",               default=str(DEFAULT_OUTPUT))
@@ -1010,12 +1108,18 @@ def main():
     audit: list[dict] = []
 
     # ── Collect ────────────────────────────────────────────────────────────────
-    print("Collecting Elliot performance files …")
-    elliot_rows = collect_elliot(elliot_root, processed_root, audit)
-    print(f"  {len(elliot_rows)} rows from Elliot")
+    if args.kaggle_root:
+        print(f"Collecting Kaggle performance files from {args.kaggle_root} …")
+        kaggle_rows = collect_kaggle(Path(args.kaggle_root), processed_root, audit)
+        elliot_rows  = [r for r in kaggle_rows if r["framework"] == "elliot"]
+        recbole_rows = [r for r in kaggle_rows if r["framework"] == "recbole"]
+    else:
+        print("Collecting Elliot performance files …")
+        elliot_rows = collect_elliot(elliot_root, processed_root, audit)
 
-    print("Collecting RecBole performance files …")
-    recbole_rows = collect_recbole(recbole_root, processed_root, audit)
+        print("Collecting RecBole performance files …")
+        recbole_rows = collect_recbole(recbole_root, processed_root, audit)
+    print(f"  {len(elliot_rows)} rows from Elliot")
     print(f"  {len(recbole_rows)} rows from RecBole")
 
     if not elliot_rows and not recbole_rows:
@@ -1023,6 +1127,8 @@ def main():
 
     # ── Merge and validate ─────────────────────────────────────────────────────
     long_df = build_long(elliot_rows + recbole_rows)
+    long_df = add_merged_pop_metrics(long_df, processed_root)
+    long_df = add_group_support(long_df, processed_root)
     long_df = validate_rows(long_df, audit)
     long_df = check_and_dedup(long_df, audit)
     long_df = assign_series_labels(long_df)

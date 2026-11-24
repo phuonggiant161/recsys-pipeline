@@ -49,7 +49,8 @@ def build_protected_row_ids(
 
     Algorithm
     ---------
-    Step 1 — For each user, select the row with the earliest timestamp.
+    Step 1 — For each user, select the second-latest row (by timestamp).
+             If the user has only one row, select that row.
              Ties are broken by __row_id (stable across runs).
 
     Step 2 — Determine which items are *not* already covered by step-1 rows.
@@ -66,14 +67,16 @@ def build_protected_row_ids(
     # Single sort used for both steps: oldest first, row_id breaks ties
     sorted_df = df.sort_values([timestamp_col, "__row_id"], kind="stable")
 
-    # Step 1: first interaction per user
-    user_first_ids: set = set(
-        sorted_df.groupby(user_col, sort=False)["__row_id"].first().values
-    )
+    # Step 1: second-latest interaction per user (the only one if n_u == 1)
+    user_groups = sorted_df.groupby(user_col, sort=False)
+    pos_from_end = user_groups.cumcount(ascending=False)  # 0 = latest
+    user_size = user_groups[user_col].transform("size")
+    user_pick_mask = (pos_from_end == 1) | (user_size == 1)
+    user_pick_ids: set = set(sorted_df.loc[user_pick_mask, "__row_id"].values)
 
     # Step 2: items not covered by step-1
     covered_items: set = set(
-        df.loc[df["__row_id"].isin(user_first_ids), item_col]
+        df.loc[df["__row_id"].isin(user_pick_ids), item_col]
     )
     uncovered_df = sorted_df.loc[~sorted_df[item_col].isin(covered_items)]
 
@@ -83,7 +86,7 @@ def build_protected_row_ids(
             uncovered_df.groupby(item_col, sort=False)["__row_id"].first().values
         )
 
-    return frozenset(user_first_ids | item_first_ids)
+    return frozenset(user_pick_ids | item_first_ids)
 
 
 def build_protected_interactions(
@@ -130,7 +133,7 @@ def thin_with_protected_user_item_interactions(
 
     Strategy
     --------
-    1. Compute the protected set (first per user + first per uncovered item).
+    1. Compute the protected set (second-latest per user + first per uncovered item).
     2. Thin only the non-protected remainder, adjusting the fraction so that
        the total kept rows equals int(round(len(df) * keep_frac)).
     3. Concatenate protected + thinned remainder.

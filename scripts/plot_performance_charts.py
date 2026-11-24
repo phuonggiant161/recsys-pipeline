@@ -50,7 +50,9 @@ plt.rcParams.update(
         "axes.spines.right": False,
         "font.size":         9,
         "axes.titlesize":    12,
-        "axes.labelsize":    9,
+        "axes.labelsize":    12,
+        "xtick.labelsize":   10,
+        "ytick.labelsize":   10,
         "legend.fontsize":   10,
         "legend.framealpha": 0.9,
         "figure.dpi":        150,
@@ -86,6 +88,8 @@ POP_GROUP_SUFFIXES      = ["pop1", "pop2_5", "pop6_10", "pop11_20", "pop21_40", 
 USER_GROUP_SUFFIXES     = ["u1", "u2_5", "u6_10", "u11_20", "u21_40", "u41plus"]
 POP_GROUP_LABELS        = ["Pop 1", "Pop 2-5", "Pop 6-10", "Pop 11-20", "Pop 21-40", "Pop 41+"]
 USER_GROUP_LABELS       = ["U 1", "U 2-5", "U 6-10", "U 11-20", "U 21-40", "U 41+"]
+MERGED_POP_GROUP_SUFFIXES = ["pop1_20", "pop21plus"]
+MERGED_POP_GROUP_LABELS   = ["Pop 1-20", "Pop 21+"]
 RANDOM_CUTOFFS          = [10, 20, 50]
 GROUP_CUTOFF            = 20
 
@@ -268,6 +272,17 @@ def load_long(input_path: Path) -> pd.DataFrame:
     return df
 
 
+def mask_low_support(df: pd.DataFrame) -> pd.DataFrame:
+    """Blank group metrics flagged low_support_{group} by build_performance_summary.py,
+    so those points are left out of the charts (values stay in the workbook)."""
+    df = df.copy()
+    for suffix in USER_GROUP_SUFFIXES + POP_GROUP_SUFFIXES:
+        flag = f"low_support_{suffix}"
+        if flag in df.columns:
+            df.loc[df[flag].astype(bool), [f"Recall_{suffix}", f"nDCG_{suffix}"]] = np.nan
+    return df
+
+
 # ── Core single-chart function ────────────────────────────────────────────────
 
 def plot_single_metric_chart(
@@ -321,7 +336,9 @@ def plot_single_metric_chart(
     y_max = sub[y_col].max(skipna=True)
     if pd.notna(y_max) and y_max > 0.02:
         ax.set_ylim(bottom=0)
-    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:.3f}"))
+    # 3 decimals collapse neighbouring ticks into the same label for tiny values
+    decimals = 3 if pd.notna(y_max) and y_max >= 0.01 else 4
+    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:.{decimals}f}"))
 
     # Gini charts: annotate strategy names at each x position
     if annotate_strategy and "strategy" in sub.columns:
@@ -597,6 +614,12 @@ def generate_gini_charts(
         (suffix, f"nDCG_{suffix}", f"nDCG ({label})")
         for suffix, label in zip(POP_GROUP_SUFFIXES, POP_GROUP_LABELS)
     ]
+    # Coarser groups (derived in build_performance_summary.py) so that sparse
+    # variants never end up with an empty group; only drawn at GROUP_CUTOFF.
+    MERGED_POP_METRICS = [
+        (suffix, f"nDCG_{suffix}", f"nDCG ({label})")
+        for suffix, label in zip(MERGED_POP_GROUP_SUFFIXES, MERGED_POP_GROUP_LABELS)
+    ]
     GINI_STRATEGIES = ["head", "random", "tail"]
     index = []
     for ds in sorted(df["dataset"].unique()):
@@ -695,7 +718,10 @@ def generate_gini_charts(
                     })
 
                 if gini_key == "item_gini":
-                    for folder, pop_metric, pop_display in EXTRA_POP_METRICS:
+                    pop_metrics = EXTRA_POP_METRICS
+                    if cutoff == GROUP_CUTOFF:
+                        pop_metrics = pop_metrics + [m for m in MERGED_POP_METRICS if m[1] in sub_c.columns]
+                    for folder, pop_metric, pop_display in pop_metrics:
                         out_path = (
                             gini_dir / folder
                             / f"{_metric_filename(pop_metric)}_vs_{gini_key}.png"
@@ -880,7 +906,7 @@ def _plot_stacked_distribution(
         bottoms = [b + v for b, v in zip(bottoms, vals)]
 
     ax.set_xticks(x_pos)
-    ax.set_xticklabels(x_labels, fontsize=8, rotation=20, ha="right")
+    ax.set_xticklabels(x_labels, fontsize=10, rotation=20, ha="right")
     ax.set_ylim(0, 108)
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{v:.0f}%"))
     ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1), fontsize=10, framealpha=0.9)
@@ -1061,7 +1087,7 @@ def plot_group_chart(
         return {"status": "skip", "reason": "no plottable data"}
 
     ax.set_xticks(x_pos)
-    ax.set_xticklabels(group_labels, fontsize=8)
+    ax.set_xticklabels(group_labels, fontsize=10)
     ax.set_ylim(bottom=0)
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{x:.3f}"))
     ax.legend(loc="best", framealpha=0.9, fontsize=10)
@@ -1460,15 +1486,17 @@ def main():
     )
 
     palette = palette_for_df(df)
+    # Group charts drop low-support points; gini charts are deliberately unfiltered.
+    df_grp = mask_low_support(df)
 
     print("\nGenerating random charts ...")
     index_random = generate_random_charts(df, out_base, palette)
 
     print("Generating coldstart_user charts ...")
-    index_cold = generate_coldstart_user_charts(df, out_base, palette)
+    index_cold = generate_coldstart_user_charts(df_grp, out_base, palette)
 
     print("Generating coldstart_pop charts ...")
-    index_pop1 = generate_coldstart_pop_charts(df, out_base, palette)
+    index_pop1 = generate_coldstart_pop_charts(df_grp, out_base, palette)
 
     print(f"Generating gini charts (keep_frac={args.gini_keep_frac}) ...")
     index_gini = generate_gini_charts(df, out_base, palette, gini_keep_frac=args.gini_keep_frac)
@@ -1478,7 +1506,7 @@ def main():
 
     print("Generating coldstart group charts (per-experiment + cross-variant) ...")
     index_groups = generate_coldstart_groups_charts(
-        df, out_base, palette, gini_keep_frac=args.gini_keep_frac
+        df_grp, out_base, palette, gini_keep_frac=args.gini_keep_frac
     )
 
     print("Generating group distribution charts ...")
