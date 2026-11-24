@@ -17,11 +17,8 @@ log/
 logs/
 log_tensorboard/
 
-# RecBole outputs
-results/recbole/
-
-# LibRecommender outputs (TwoTower checkpoints/npz can be tens/hundreds of MB each)
-results/librecommender/
+# All experiment outputs (results, checkpoints, figures, summaries)
+results/
 
 # Elliot outputs written to external/results/ (generated, not source)
 external/results/
@@ -34,8 +31,6 @@ data/recbole_*/
 data/processed_old_*/
 data/reports/[A-E]/
 kaggle_upload/
-results/elliot/*/recs/
-results/elliot/*/logs/
 
 *.csv
 *.tsv
@@ -44,7 +39,6 @@ results/elliot/*/logs/
 !data/processed/.gitkeep
 !data/reports/.gitkeep
 !data/reports/*.csv
-!results/elliot/*/performance/*.tsv
 
 
 # Third-party LibRecommender source — installed separately

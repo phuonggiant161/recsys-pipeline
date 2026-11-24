@@ -1,7 +1,0 @@
-{
-  "framework": "recbole",
-  "dataset": "hm_random_keep0.05",
-  "model": "Pop",
-  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\hm_random_keep0.05\\Pop\\Pop-Nov-24-2026_19-57-54.pth",
-  "artifact_type": "checkpoint"
-}
