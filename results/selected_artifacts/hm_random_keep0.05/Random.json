@@ -1,0 +1,7 @@
+{
+  "framework": "recbole",
+  "dataset": "hm_random_keep0.05",
+  "model": "Random",
+  "selected_artifact": "D:\\recsys-pipeline\\results\\recbole\\_checkpoints\\hm_random_keep0.05\\Random\\Random-Nov-24-2026_19-57-33.pth",
+  "artifact_type": "checkpoint"
+}

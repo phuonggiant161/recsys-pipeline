@@ -540,7 +540,10 @@ def _discover_pairs(filter_str: str | None, model_filter: str | None) -> list[tu
             if (meta.get("framework"), meta.get("artifact_type")) not in _SUPPORTED_FRAMEWORK_ARTIFACT:
                 continue
             model = artifact_file.stem
-            if model_filter and model.lower() != model_filter.lower():
+            # model_filter may be a comma-separated list, e.g. "Random,Pop"
+            if model_filter and model.lower() not in {
+                m.strip().lower() for m in model_filter.split(",") if m.strip()
+            }:
                 continue
             pairs.append((dataset, model))
     if not pairs:
@@ -615,7 +618,8 @@ def main():
     parser.add_argument(
         "--model",
         metavar="MODEL",
-        help="Model name. Required with --dataset; optional filter with --all.",
+        help="Model name. Required with --dataset; optional filter with --all "
+             "(comma-separated list allowed, e.g. Random,Pop).",
     )
     parser.add_argument(
         "--filter",

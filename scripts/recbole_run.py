@@ -11,6 +11,7 @@ Usage:
     python scripts/recbole_run.py --all --model SASRec --overwrite
     python scripts/recbole_run.py --all --model all --overwrite
     python scripts/recbole_run.py --all --model ItemKNN --filter amazon_random_keep0.5 --overwrite
+    python scripts/recbole_run.py --all --model Random,Pop          # baselines only
 """
 
 import argparse
@@ -51,6 +52,9 @@ _MODEL_TO_YAML: dict[str, Path] = {
     "NeuMF":   _PROJECT_ROOT / "configs" / "recbole" / "neumf.yml",
     "LightGCN": _PROJECT_ROOT / "configs" / "recbole" / "lightgcn.yml",
     "SASRec":  _PROJECT_ROOT / "configs" / "recbole" / "sasrec.yaml",
+    # Non-personalised baselines (RecBole built-in Random / Pop = MostPop)
+    "Random":  _PROJECT_ROOT / "configs" / "recbole" / "random.yml",
+    "Pop":     _PROJECT_ROOT / "configs" / "recbole" / "pop.yml",
 }
 _ALL_MODELS = list(_MODEL_TO_YAML.keys())
 
@@ -248,17 +252,21 @@ def main():
     )
     args = p.parse_args()
 
-    # Resolve model list — case-insensitive lookup
+    # Resolve model list — case-insensitive lookup; comma-separated list allowed
+    # (e.g. --model Random,Pop)
     model_arg = args.model.strip().lower()
     _name_map = {k.lower(): k for k in _ALL_MODELS}
     if model_arg == "all":
         models = _ALL_MODELS
-    elif model_arg in _name_map:
-        models = [_name_map[model_arg]]
     else:
-        raise SystemExit(
-            f"ERROR: --model must be one of: {valid_names}, all. Got: {args.model!r}"
-        )
+        requested = [m.strip() for m in model_arg.split(",") if m.strip()]
+        unknown = [m for m in requested if m not in _name_map]
+        if not requested or unknown:
+            raise SystemExit(
+                f"ERROR: --model must be one of: {valid_names}, all "
+                f"(or a comma-separated list). Got: {args.model!r}"
+            )
+        models = list(dict.fromkeys(_name_map[m] for m in requested))
 
     # Validate YAML files exist
     for m in models:
