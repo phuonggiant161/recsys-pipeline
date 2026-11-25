@@ -41,8 +41,10 @@ kaggle_upload/
 !data/reports/*.csv
 
 
-# Third-party LibRecommender source — installed separately
-external/librecommender/
+# Third-party LibRecommender 1.5.2 source: only the pure-Python `libreco` package
+# is tracked, so Kaggle can use it via PYTHONPATH (the PyPI sdist fails to build there).
+external/[Ll]ib[Rr]ecommender/*
+!external/[Ll]ib[Rr]ecommender/libreco/
 
 # Ad-hoc backup folders created during rerun cleanups (large model/data dumps)
 _backup*/
