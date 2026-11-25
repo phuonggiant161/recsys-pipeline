@@ -1,10 +1,10 @@
 experiment:
-  dataset: hm_random_keep0.3
+  dataset: amazon_random_keep0.2
   data_config:
     strategy: fixed
-    train_path: ../../../../data/processed/hm_random_keep0.3/train.tsv
-    validation_path: ../../../../data/processed/hm_random_keep0.3/valid.tsv
-    test_path: ../../../../data/processed/hm_random_keep0.3/test.tsv
+    train_path: ../../../../data/processed/amazon_random_keep0.2/train.tsv
+    validation_path: ../../../../data/processed/amazon_random_keep0.2/valid.tsv
+    test_path: ../../../../data/processed/amazon_random_keep0.2/test.tsv
   top_k: 50
   evaluation:
     cutoffs:
@@ -46,10 +46,10 @@ experiment:
     - nDCG_u11_20
     - nDCG_u21_40
     - nDCG_u41plus
-  path_output_rec_performance: results/elliot/hm_random_keep0.3/performance/
-  path_log_folder: ../../../../results/elliot/hm_random_keep0.3/logs/
+  path_output_rec_performance: results/elliot/amazon_random_keep0.2/performance/
+  path_log_folder: ../../../../results/elliot/amazon_random_keep0.2/logs/
   gpu: 0
   models:
     ProxyRecommender:
-      source_model: FunkSVD
+      source_model: VSM
       path: selected_artifact

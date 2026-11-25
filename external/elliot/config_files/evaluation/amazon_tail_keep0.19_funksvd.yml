@@ -1,10 +1,10 @@
 experiment:
-  dataset: amazon_head_keep0.1
+  dataset: amazon_tail_keep0.19
   data_config:
     strategy: fixed
-    train_path: ../../../../data/processed/amazon_head_keep0.1/train.tsv
-    validation_path: ../../../../data/processed/amazon_head_keep0.1/valid.tsv
-    test_path: ../../../../data/processed/amazon_head_keep0.1/test.tsv
+    train_path: ../../../../data/processed/amazon_tail_keep0.19/train.tsv
+    validation_path: ../../../../data/processed/amazon_tail_keep0.19/valid.tsv
+    test_path: ../../../../data/processed/amazon_tail_keep0.19/test.tsv
   top_k: 50
   evaluation:
     cutoffs:
@@ -46,8 +46,8 @@ experiment:
     - nDCG_u11_20
     - nDCG_u21_40
     - nDCG_u41plus
-  path_output_rec_performance: results/elliot/amazon_head_keep0.1/performance/
-  path_log_folder: ../../../../results/elliot/amazon_head_keep0.1/logs/
+  path_output_rec_performance: results/elliot/amazon_tail_keep0.19/performance/
+  path_log_folder: ../../../../results/elliot/amazon_tail_keep0.19/logs/
   gpu: 0
   models:
     ProxyRecommender:
