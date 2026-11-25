@@ -1,5 +1,5 @@
 """
-Generate Elliot post-hoc evaluation configs for FunkSVD and VSM.
+Generate Elliot post-hoc evaluation configs for VSM (FunkSVD is no longer run).
 
 Base configuration is defined inline in _BASE_CONFIG — no external template file.
 Output: external/elliot/config_files/evaluation/<dataset>_<model>.yml
@@ -23,7 +23,8 @@ _PROJECT_ROOT  = Path(__file__).resolve().parent.parent
 _EVAL_OUT_DIR  = _PROJECT_ROOT / "external" / "elliot" / "config_files" / "evaluation"
 _PROCESSED_DIR = _PROJECT_ROOT / "data" / "processed"
 
-_EVAL_MODELS = ["FunkSVD", "VSM"]
+# FunkSVD dropped from the experiment set -- VSM is the only Elliot model run.
+_EVAL_MODELS = ["VSM"]
 
 # evaluation/ is one level deeper than config_files/ → 4 ../ to reach project root
 _DATA_PREFIX = "../../../../data/processed"
@@ -81,6 +82,10 @@ _BASE_CONFIG: dict = {
                 "nDCG_u11_20",
                 "nDCG_u21_40",
                 "nDCG_u41plus",
+                "Recall_pop21plus",
+                "nDCG_pop21plus",
+                "Recall_u21plus",
+                "nDCG_u21plus",
             ],
         },
         "path_output_rec_performance": None,
@@ -170,7 +175,7 @@ def generate(filter_str: str = "") -> tuple[int, int]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate Elliot evaluation configs for FunkSVD and VSM"
+        description="Generate Elliot evaluation configs for VSM"
     )
     parser.add_argument(
         "--filter", default="", metavar="TEXT",

@@ -227,6 +227,10 @@ experiment:
       - nDCG_u11_20
       - nDCG_u21_40
       - nDCG_u41plus
+      - Recall_pop21plus
+      - nDCG_pop21plus
+      - Recall_u21plus
+      - nDCG_u21plus
 
   path_output_rec_result: {_RECS_FROM_CWD}/{folder_name}/recs/
   path_output_rec_performance: {_RECS_FROM_CWD}/{folder_name}/performance/

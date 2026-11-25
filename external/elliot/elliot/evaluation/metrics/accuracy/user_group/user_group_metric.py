@@ -12,6 +12,7 @@ make_pop_recall_metric(group_name)
 make_pop_ndcg_metric(group_name)
     Popularity-group Recall/nDCG with fixed bins:
         pop1 (count=1), pop2_5 (2-5), pop6_10 (6-10), pop11_20 (11-20), pop21_40 (21-40), pop41plus (>=41)
+        plus the merged group pop21plus (>=21); likewise u21plus for user groups.
     Semantics:
     - Popularity = number of interactions in the TRAIN set.
     - Per user: denominator = |GT items in group|.
@@ -35,6 +36,7 @@ _POP_BINS = [
     ("pop11_20",  lambda c: 11 <= c <= 20),
     ("pop21_40",  lambda c: 21 <= c <= 40),
     ("pop41plus", lambda c: c >= 41),
+    ("pop21plus", lambda c: c >= 21),  # merged pop21_40 ∪ pop41plus (additional, overlaps)
 ]
 
 
@@ -66,6 +68,7 @@ _USER_BINS = {
     "u11_20":  lambda c: 11 <= c <= 20,
     "u21_40":  lambda c: 21 <= c <= 40,
     "u41plus": lambda c: c >= 41,
+    "u21plus": lambda c: c >= 21,  # merged u21_40 ∪ u41plus (additional, overlaps)
 }
 
 

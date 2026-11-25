@@ -109,6 +109,9 @@ _metric_dictionary = {
     "nDCG_u11_20":    make_user_group_metric(nDCG, "u11_20"),
     "nDCG_u21_40":    make_user_group_metric(nDCG, "u21_40"),
     "nDCG_u41plus":   make_user_group_metric(nDCG, "u41plus"),
+    # Merged group u21_40 ∪ u41plus (additional, overlaps the fine groups)
+    "Recall_u21plus": make_user_group_metric(Recall, "u21plus"),
+    "nDCG_u21plus":   make_user_group_metric(nDCG, "u21plus"),
     "MAP_u1": make_u1_metric(MAP),
     "MRR_u1": make_u1_metric(MRR),
     "Recall_tail": make_tail_metric(Recall),
@@ -126,6 +129,9 @@ _metric_dictionary = {
     "nDCG_pop11_20":    make_pop_ndcg_metric("pop11_20"),
     "nDCG_pop21_40":    make_pop_ndcg_metric("pop21_40"),
     "nDCG_pop41plus":   make_pop_ndcg_metric("pop41plus"),
+    # Merged group pop21_40 ∪ pop41plus (additional, overlaps the fine groups)
+    "Recall_pop21plus": make_pop_recall_metric("pop21plus"),
+    "nDCG_pop21plus":   make_pop_ndcg_metric("pop21plus"),
 }
 
 _lower_dict = {k.lower(): v for k, v in _metric_dictionary.items()}

@@ -27,12 +27,16 @@ _pop_metrics = [
     'PopRecall_pop11_20', 'PopRecall_pop21_40', 'PopRecall_pop41plus',
     'PopNDCG_pop1',       'PopNDCG_pop2_5',     'PopNDCG_pop6_10',
     'PopNDCG_pop11_20',   'PopNDCG_pop21_40',   'PopNDCG_pop41plus',
+    # merged group (pop21_40 ∪ pop41plus), reported in addition to the fine groups
+    'PopRecall_pop21plus', 'PopNDCG_pop21plus',
 ]
 _user_metrics = [
     'UserRecall_u1',     'UserRecall_u2_5',   'UserRecall_u6_10',
     'UserRecall_u11_20', 'UserRecall_u21_40', 'UserRecall_u41plus',
     'UserNDCG_u1',       'UserNDCG_u2_5',     'UserNDCG_u6_10',
     'UserNDCG_u11_20',   'UserNDCG_u21_40',   'UserNDCG_u41plus',
+    # merged group (u21_40 ∪ u41plus), reported in addition to the fine groups
+    'UserRecall_u21plus', 'UserNDCG_u21plus',
 ]
 _beyond_metrics = ['ItemCoverage', 'AveragePopularity', 'GiniIndex', 'TailPercentage']
 
@@ -189,7 +193,7 @@ def _run_checkpoint(
 _NEUTRAL_CONFIG_FILE = _PROJECT_ROOT / "configs" / "recbole" / "bpr.yml"
 _RECBOLE_DATA_ROOT   = _PROJECT_ROOT / "data" / "recbole"
 
-_POP_GROUP_KEYS = ["pop1", "pop2_5", "pop6_10", "pop11_20", "pop21_40", "pop41plus"]
+_POP_GROUP_KEYS = ["pop1", "pop2_5", "pop6_10", "pop11_20", "pop21_40", "pop41plus", "pop21plus"]
 
 
 def _build_external_eval_context(dataset_name: str):

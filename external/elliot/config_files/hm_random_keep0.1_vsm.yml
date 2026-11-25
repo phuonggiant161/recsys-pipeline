@@ -49,6 +49,10 @@ experiment:
       - nDCG_u11_20
       - nDCG_u21_40
       - nDCG_u41plus
+      - Recall_pop21plus
+      - nDCG_pop21plus
+      - Recall_u21plus
+      - nDCG_u21plus
 
   path_output_rec_result: ../../results/elliot/hm_random_keep0.1/recs/
   path_output_rec_performance: ../../results/elliot/hm_random_keep0.1/performance/

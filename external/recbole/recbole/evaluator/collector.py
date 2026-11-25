@@ -125,6 +125,7 @@ class Collector(object):
                 ("pop11_20",  lambda c: 11 <= c <= 20),
                 ("pop21_40",  lambda c: 21 <= c <= 40),
                 ("pop41plus", lambda c: c >= 41),
+                ("pop21plus", lambda c: c >= 21),  # merged pop21_40 ∪ pop41plus
             ]
             pop_groups = {
                 g: {item for item, cnt in count_items.items() if pred(cnt)}
@@ -269,7 +270,7 @@ class Collector(object):
             result = torch.cat((pos_idx, pos_len_list), dim=1)
             self.data_struct.update_tensor("rec.topktail", result)
 
-        _POP_GROUP_KEYS = ["pop1", "pop2_5", "pop6_10", "pop11_20", "pop21_40", "pop41plus"]
+        _POP_GROUP_KEYS = ["pop1", "pop2_5", "pop6_10", "pop11_20", "pop21_40", "pop41plus", "pop21plus"]
         if any(self.register.need(f"rec.topk_{g}") for g in _POP_GROUP_KEYS):
             pop_groups = self.data_struct.get("data.pop_groups")
             _, _topk_idx = torch.topk(scores_tensor, max(self.topk), dim=-1)
@@ -327,6 +328,7 @@ class Collector(object):
             "rec.topktail",
             "rec.topk_pop1", "rec.topk_pop2_5", "rec.topk_pop6_10",
             "rec.topk_pop11_20", "rec.topk_pop21_40", "rec.topk_pop41plus",
+            "rec.topk_pop21plus",
         ]:
             if key in self.data_struct:
                 del self.data_struct[key]
